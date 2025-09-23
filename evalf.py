@@ -2,26 +2,29 @@ import numpy as np
 
 class Params:
     def __init__(self, lc=0, tc=0, nc=0, k8=0, ng=0, ki=0, dc=0, D_c=0, lt8=0, rl=0, kq=0, dt8=0,
-                 D_t8=0, ligt8=0, dig=0, D_ig=0, mu_a=0, da=0, D_a=0):
-        self.lc = lc # lambda_c
-        self.tc = tc # theta_c
-        self.nc = nc # n_c
-        self.k8 = k8 # kappa_8
-        self.ng = ng # n_g
-        self.ki = ki # K_i
-        self.dc = dc # d_c
-        self.D_c = D_c # D_c
-        self.lt8 = lt8 # lambda_t8
-        self.rl = rl # rho_l
-        self.kq = kq # K_q
-        self.dt8 = dt8 # d_t8
-        self.D_t8 = D_t8 # D_t8
-        self.ligt8 = ligt8 # lambda_igt8
-        self.dig = dig # d_ig
-        self.D_ig = D_ig # D_ig
-        self.mu_a = mu_a # mu_a
-        self.da = da # d_a
-        self.D_a = D_a # D_a
+                 D_t8=0, ligt8=0, dig=0, D_ig=0, mu_a=0, da=0, D_a=0, dxFD=10e-6, rows=1, cols=1):
+        self.lc = lc # lambda_c -            0.5
+        self.tc = tc # theta_c -             5e7
+        self.nc = nc # n_c -                 2
+        self.k8 = k8 # kappa_8 -             3e-7
+        self.ng = ng # n_g -                 0.1
+        self.ki = ki # K_i                   couldn't find
+        self.dc = dc # d_c -                 0.18
+        self.D_c = D_c # D_c                 0.01
+        self.lt8 = lt8 # lambda_t8 -         0.03
+        self.rl = rl # rho_l -               3e-7
+        self.kq = kq # K_q -                 12.6
+        self.dt8 = dt8 # d_t8 -              0.1
+        self.D_t8 = D_t8 # D_t8 -            0.01
+        self.ligt8 = ligt8 # lambda_igt8 -   2.5e-8
+        self.dig = dig # d_ig -              18
+        self.D_ig = D_ig # D_ig -            0.01
+        self.mu_a = mu_a # mu_a -            0.03
+        self.da = da # d_a -                 0.05
+        self.D_a = D_a # D_a -               0.01
+        self.dxFD = dxFD # Step size
+        self.rows = rows # rows in grid
+        self.cols = cols # cols in grid
 
     def tuple(self):
         return (self.lc, self.tc, self.nc, self.k8, self.ng, self.ki, self.dc, self.D_c,
@@ -34,7 +37,7 @@ def evalf(x, p, u):
     grid_y = shape[1]
     assert shape[2] == 5, "x must have five components in the last dimension"
     (lc, tc, nc, k8, ng, ki, dc, D_c, lt8, rl, kq, dt8, D_t8, ligt8, dig, D_ig, mu_a, da, D_a) = p.tuple()
-    ra = u
+    ra = u # 0.015
     f_val = np.zeros(shape)
 
     for i in range(grid_x):
