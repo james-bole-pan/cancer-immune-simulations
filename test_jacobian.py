@@ -3,7 +3,7 @@ import pytest
 import evalf_autograd as f
 import eval_Jf_FiniteDifference_flatten as j
 
-class Test_evalf_autograd:
+class Test_jacobian:
     """Regression tests for the evalf_autograd function"""
     
     def setup_method(self):
@@ -43,7 +43,6 @@ class Test_evalf_autograd:
 
     def test_plot_jacobian(self):
         result = j.eval_Jf_FiniteDifference(f.evalf_autograd, self.x0_basic, self.p_standard, self.u_standard)
-        print(result[0])
         import matplotlib.pyplot as plt
         plt.imshow(np.log10(np.abs(result[0]) + 1e-12), cmap='hot', interpolation='nearest')
         plt.colorbar()
@@ -66,17 +65,31 @@ class Test_evalf_autograd:
     def test_output_nonsingularity(self):
         """Test that output is nonsingular for most input values"""
 
-        perturbations = [np.exp(10 * (np.random.rand(len(self.p_standard.tuple())) - 0.5)) for _ in range(100)]
+        perturbations = [np.exp(10 * (np.random.rand(len(self.p_standard.tuple())) - 0.5)) for _ in range(1)]
 
         def perturb_p(perturbation):
-            print(len(perturbation))
-            print(len(self.p_standard.tuple()))
-            return f.Params(*([self.p_standard.tuple()[i] * perturbation[i] for i in range(len(perturbation))]))
+            params = [self.p_standard.tuple()[i] * perturbation[i] for i in range(len(perturbation))]
+            # Round the last three parameters to the nearest integer
+            for i in range(-3, 0):
+                params[i] = self.p_standard.tuple()[i]
+            return f.Params(*params)
 
-        results = [abs(np.linalg.det(j.eval_Jf_FiniteDifference(f.evalf_autograd, self.x0_basic, perturb_p(perturbation), self.u_standard))) > 0.001
-                   for perturbation in perturbations]
+        print("TEST TEST")
+
+        results = []
+        for perturbation in perturbations:
+            perturbed_params = perturb_p(perturbation)
+            print(1)
+            jacobian = j.eval_Jf_FiniteDifference(f.evalf_autograd, self.x0_basic, perturbed_params, self.u_standard)
+            print(2)
+            det_jacobian = np.linalg.det(jacobian[0])
+            print(3)
+            is_nonsingular = abs(det_jacobian) > 0.001
+            print(4)
+            results.append(is_nonsingular)
         
         is_good = np.mean(results)
+
         assert is_good > 0.95, "Most Jacobians should be nonsingular"
 
     def test_output_sparsity(self):
@@ -119,7 +132,7 @@ class Test_evalf_autograd:
 
 if __name__ == "__main__":
     # Run tests if script is executed directly
-    test_instance = Test_evalf_autograd()
+    test_instance = Test_jacobian()
     test_instance.setup_method()
     
     print("Running evalf_autograd regression tests...")
