@@ -20,7 +20,7 @@ class Test_evalf_autograd:
             lc=0.5,        # lambda_c
             tc=5e7,        # theta_c
             nc=2,          # n_c
-            k8=0.3,       # kappa_8
+            k8=0.00003,       # kappa_8
             ng=0.1,        # n_g
             ki=10,         # K_i
             dc=0.18,       # d_c
