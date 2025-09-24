@@ -29,14 +29,14 @@ class Params:
     def tuple(self):
         return (self.lc, self.tc, self.nc, self.k8, self.ng, self.ki, self.dc, self.D_c,
                 self.lt8, self.rl, self.kq, self.dt8, self.D_t8, self.ligt8, self.dig,
-                self.D_ig, self.mu_a, self.da, self.D_a)
+                self.D_ig, self.mu_a, self.da, self.D_a, self.dxFD, self.rows, self.cols)
 
 def evalf(x, p, u):
     shape = np.shape(x)
     grid_x = shape[0]
     grid_y = shape[1]
     assert shape[2] == 5, "x must have five components in the last dimension"
-    (lc, tc, nc, k8, ng, ki, dc, D_c, lt8, rl, kq, dt8, D_t8, ligt8, dig, D_ig, mu_a, da, D_a) = p.tuple()
+    (lc, tc, nc, k8, ng, ki, dc, D_c, lt8, rl, kq, dt8, D_t8, ligt8, dig, D_ig, mu_a, da, D_a, dxFD, rows, cols) = p.tuple()
     ra = u # 0.015
     f_val = np.zeros(shape)
 

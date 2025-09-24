@@ -23,7 +23,7 @@ class Params:
     def tuple(self):
         return (self.lc, self.tc, self.nc, self.k8, self.ng, self.ki, self.dc, self.D_c,
                 self.lt8, self.rl, self.kq, self.dt8, self.D_t8, self.ligt8, self.dig,
-                self.D_ig, self.mu_a, self.da, self.D_a)
+                self.D_ig, self.mu_a, self.da, self.D_a, self.dxFD, self.rows, self.cols)
 
 # ------------------------------
 # Autograd-compatible evalf
@@ -34,7 +34,7 @@ def evalf_autograd(x, p: Params, u):
     returns: same shape of time-derivatives
     """
     (lc, tc, nc, k8, ng, ki, dc, D_c, lt8, rl, kq, dt8, D_t8,
-     ligt8, dig, D_ig, mu_a, da, D_a) = p.tuple()
+     ligt8, dig, D_ig, mu_a, da, D_a, dxFD, rows, cols) = p.tuple()
     ra = u
 
     rows, cols, d = x.shape

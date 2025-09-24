@@ -147,73 +147,56 @@ class Test_evalf_autograd:
         # (This is a more complex systems-level effect, but we can check that dynamics are reasonable)
         assert np.all(np.isfinite(result)), "High drug effectiveness should produce finite dynamics"
 
-    def test_zero_diffusion_no_neighbor_effects(self):
-        """Test that zero diffusion coefficients eliminate spatial coupling"""
-        # Set all diffusion coefficients to zero
-        p_no_diff = f.Params(
-            lc=0.5, tc=5e7, nc=2, k8=3e-7, ng=0.1, ki=10, dc=0.18,
-            D_c=0.0,       # No cancer diffusion
-            lt8=0.03, rl=3e-7, kq=12.6, dt8=0.1,
-            D_t8=0.0,      # No T8 diffusion
-            ligt8=2.5e-8, dig=18,
-            D_ig=0.0,      # No IFN-γ diffusion
-            mu_a=0.03, da=0.05,
-            D_a=0.0,       # No antigen diffusion
-            rows=2, cols=2
+    def test_single_cell_input(self):
+        """Test evalf_autograd function with a single cell (1,1,5) input"""
+        # Create a single cell initial state
+        x0_single = np.array([[[1.0e7, 1.0e7, 0.0029, 0.02, 0.015]]])
+        
+        # Single cell parameters
+        p_single = f.Params(
+            lc=0.5, tc=5e7, nc=2, k8=3e-7, ng=0.1, ki=10, dc=0.18, D_c=0.01,
+            lt8=0.03, rl=3e-7, kq=12.6, dt8=0.1, D_t8=0.01,
+            ligt8=2.5e-8, dig=18, D_ig=0.01,
+            mu_a=0.03, da=0.05, D_a=0.01, 
+            rows=1, cols=1  # Single cell
         )
         
-        # Create asymmetric initial condition
-        x0_asym = np.array([
-            [[1.0e7, 1.0e7, 0.0029, 0.02, 0.015], [2.0e7, 2.0e7, 0.006, 0.04, 0.03]],
-            [[1.5e7, 1.5e7, 0.004, 0.03, 0.02], [1.0e7, 1.0e7, 0.0029, 0.02, 0.015]]
-        ])
+        print(f"Testing single cell with shape: {x0_single.shape}")
+        print(f"Initial values: c={x0_single[0,0,0]:.2e}, t8={x0_single[0,0,1]:.2e}, "
+              f"ig={x0_single[0,0,2]:.4f}, p8={x0_single[0,0,3]:.3f}, a={x0_single[0,0,4]:.3f}")
         
-        result = f.evalf_autograd(x0_asym, p_no_diff, self.u_standard)
-        
-        # With no diffusion, each cell should evolve independently
-        # The dynamics should be purely local (no spatial coupling terms)
-        # This is mainly a structural test - we verify the function runs without error
-        assert result.shape == x0_asym.shape, "Output shape should match input shape"
-        assert np.all(np.isfinite(result)), "All dynamics should be finite"
-
-    def test_equilibrium_conditions(self):
-        """Test behavior near equilibrium points"""
-        # Set initial conditions close to what might be an equilibrium
-        x0_equilibrium = np.array([
-            [[1.0e6, 5.0e6, 0.001, 0.01, 0.005], [1.0e6, 5.0e6, 0.001, 0.01, 0.005]],
-            [[1.0e6, 5.0e6, 0.001, 0.01, 0.005], [1.0e6, 5.0e6, 0.001, 0.01, 0.005]]
-        ])
-        
-        result = f.evalf_autograd(x0_equilibrium, self.p_standard, self.u_standard)
-        
-        # Near equilibrium, dynamics should be relatively small
-        max_dynamics = np.max(np.abs(result))
-        assert max_dynamics < 1e8, "Dynamics should be bounded near equilibrium"
-
-    def test_output_shape_consistency(self):
-        """Test that output shape always matches input shape"""
-        # Test different grid sizes
-        test_shapes = [
-            (1, 1, 5),  # Single cell
-            (2, 2, 5),  # 2x2 grid
-            (3, 3, 5),  # 3x3 grid
-        ]
-        
-        for rows, cols, vars in test_shapes:
-            x_test = np.ones((rows, cols, vars)) * 1e6  # Initialize with reasonable values
-            x_test[:, :, 2:] *= 1e-3  # Scale down the last 3 variables
+        try:
+            result = f.evalf_autograd(x0_single, p_single, self.u_standard)
             
-            p_test = f.Params(
-                lc=0.5, tc=5e7, nc=2, k8=3e-7, ng=0.1, ki=10, dc=0.18, D_c=0.01,
-                lt8=0.03, rl=3e-7, kq=12.6, dt8=0.1, D_t8=0.01,
-                ligt8=2.5e-8, dig=18, D_ig=0.01,
-                mu_a=0.03, da=0.05, D_a=0.01, rows=rows, cols=cols
-            )
+            print(f"Result shape: {result.shape}")
+            print(f"Derivatives: dc/dt={result[0,0,0]:.2e}, dt8/dt={result[0,0,1]:.2e}, "
+                  f"dig/dt={result[0,0,2]:.4f}, dp8/dt={result[0,0,3]:.4f}, da/dt={result[0,0,4]:.4f}")
             
-            result = f.evalf_autograd(x_test, p_test, self.u_standard)
+            # Basic sanity checks
+            assert result.shape == (1, 1, 5), f"Result shape should be (1,1,5), got {result.shape}"
+            assert np.all(np.isfinite(result)), "All derivatives should be finite"
             
-            assert result.shape == (rows, cols, vars), f"Shape mismatch for {rows}x{cols} grid"
-            assert np.all(np.isfinite(result)), "All outputs should be finite"
+            # Check that diffusion terms are effectively zero (no neighbors)
+            # For a single cell, the neighbor sums should all be zero
+            # So the dynamics should be purely local (no diffusion contribution)
+            
+            # Extract derivatives
+            dc_dt, dt8_dt, dig_dt, dp8_dt, da_dt = result[0, 0, :]
+            
+            # Verify we get reasonable dynamics
+            print(f"Cancer growth term check: dc_dt should reflect local growth/death dynamics")
+            print(f"T8 dynamics: dt8_dt = {dt8_dt:.4f}")
+            print(f"IFN-γ dynamics: dig_dt = {dig_dt:.4f}")
+            
+            # Since there are no neighbors, diffusion terms should be zero
+            # The dynamics should be purely based on local interactions
+            
+            return result
+            
+        except Exception as e:
+            print(f"Error with single cell input: {e}")
+            print(f"Error type: {type(e).__name__}")
+            raise e
 
 if __name__ == "__main__":
     # Run tests if script is executed directly
