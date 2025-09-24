@@ -43,8 +43,14 @@ def evalf(x, p, u):
     for i in range(grid_x):
         for j in range(grid_y):
             c, t8, ig, p8, a = x[i, j, :]
-            neighbors = sum(x[i + di, j + dj, :] for di in [-1, 0, 1] for dj in [-1, 0, 1]
-                            if di != dj and 0 <= i + di < grid_x and 0 <= j + dj < grid_y)
+            neighbors = sum(
+                x[i + di, j + dj, :]
+                for di in [-1, 0, 1]
+                for dj in [-1, 0, 1]
+                if not (di == 0 and dj == 0)  # exclude the center (i,j) itself
+                and 0 <= i + di < grid_x
+                and 0 <= j + dj < grid_y
+            )
             cn, t8n, ign, _, an = neighbors
             del_c = (lc / (1 + (c / tc)**nc) - (k8 * t8 + ng * ig / (ig + ki)) - dc) * c + D_c * cn
             del_t8 = (lt8 / (1 + rl * p8 * c / kq) - dt8) * t8 + D_t8 * t8n
