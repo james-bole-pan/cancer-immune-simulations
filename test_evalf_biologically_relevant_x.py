@@ -3,6 +3,7 @@ import pytest
 import evalf_autograd as f
 import matplotlib.pyplot as plt
 import os
+import copy
 
 class Test_evalf_autograd:
     """Regression tests for the evalf_autograd function"""
@@ -19,7 +20,7 @@ class Test_evalf_autograd:
             lc=0.5,        # lambda_c
             tc=5e7,        # theta_c
             nc=2,          # n_c
-            k8=0.3,       # kappa_8
+            k8=0.00003,       # kappa_8
             ng=0.1,        # n_g
             ki=10,         # K_i
             dc=0.18,       # d_c
@@ -134,18 +135,6 @@ class Test_evalf_autograd:
         assert len(y2_trajectory) == self.n_steps, f"Trajectory length should match number of steps{suffix}"
         assert np.all(np.isfinite(y1_trajectory)), f"Tumor trajectory should be finite{suffix}"
         assert np.all(np.isfinite(y2_trajectory)), f"Immune trajectory should be finite{suffix}"
-    
-    def _create_params_with_override(self, **overrides):
-        """Helper method to create Params object with specific overrides"""
-        param_dict = {
-            'lc': 0.5, 'tc': 5e7, 'nc': 2, 'k8': 3e-7, 'ng': 0.1, 'ki': 10,
-            'dc': 0.18, 'D_c': 0.01, 'lt8': 0.03, 'rl': 3e-7, 'kq': 12.6,
-            'dt8': 0.1, 'D_t8': 0.01, 'ligt8': 2.5e-8, 'dig': 18, 'D_ig': 0.01,
-            'mu_a': 0.03, 'da': 0.05, 'D_a': 0.01,
-            'rows': self.x0.shape[0], 'cols': self.x0.shape[1]
-        }
-        param_dict.update(overrides)
-        return f.Params(**param_dict)
 
     def test_all_parameters_high_values(self):
         """Test trajectory simulation with each parameter set to high value individually"""
@@ -181,7 +170,8 @@ class Test_evalf_autograd:
             print(f"Testing parameter: {param_name} = {high_value}")
             
             # Create parameter set with one parameter set to high value
-            p_test = self._create_params_with_override(**{param_name: high_value})
+            p_test = copy.deepcopy(self.p_standard)
+            setattr(p_test, param_name, high_value)
             
             # Simulate trajectory
             time_points, y1_trajectory, y2_trajectory = self._simulate_trajectory(p_test, title_suffix)
@@ -277,12 +267,11 @@ class Test_evalf_autograd:
         """Test trajectory simulation with high drug concentration (r_a)"""
         
         # Use standard parameters but increase the drug input concentration
-        p_test = self.p_standard
         high_drug_input = 1000.0  # 10x higher than standard (0.015)
         
         # Simulate trajectory with high drug input
         time_points, y1_trajectory, y2_trajectory = self._simulate_trajectory_with_drug_input(
-            p_test, high_drug_input, 'High Drug Concentration (r_a)'
+            self.p_standard, high_drug_input, 'High Drug Concentration (r_a)'
         )
         
         # Create and save plot
