@@ -1,55 +1,53 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-def VisualizeState(frame, t, X, ax):
+def VisualizeState(n, t, X, ax):
     """
-    Simple visualization function for SimpleSolver
-    
-    Parameters:
-    -----------
-    frame : int
-        Current frame index
-    t : array
-        Time points
-    X : array
-        State trajectories (variables x time)
-    ax : tuple of axes
-        Matplotlib axes for plotting
+    Visualizes state components. It can be used to visualize:
+    1) the time domain evolution of the state during ODE integration
+    2) or the intermediate progress of a Newton iteration
+
+    INPUTS:
+    n	     index of the current data to be added to the plot
+    t 	     vector containing time stamps
+             (or iteration indeces when used to visualize itermediate Newton iterations)
+    X	     contains intermediate solutions as columns
+    ax       A tuple containing the axes of figures
+
+    EXAMPLES:
+    VisualizeState(t,X,n,plottype);       % to visualize time domain evolution
+    VisualizeState([1:1:k,X,k,plottype);  % to visualize Newton iteration progress
     """
-    
-    # Clear previous plots
-    for a in ax:
-        a.clear()
-    
-    # Plot state evolution
-    if len(ax) >= 2:
-        # Plot first few variables
-        ax[0].plot(t[:frame+1], X[0, :frame+1], 'r-', label='Cancer cells', linewidth=2)
-        if X.shape[0] > 1:
-            ax[0].plot(t[:frame+1], X[1, :frame+1], 'b-', label='T8 cells', linewidth=2)
-        ax[0].set_xlabel('Time')
-        ax[0].set_ylabel('Cell Count')
-        ax[0].set_title(f'Cell Populations (t = {t[frame]:.3f})')
-        ax[0].legend()
-        ax[0].grid(True, alpha=0.3)
-        
-        # Plot remaining variables
-        if X.shape[0] > 2:
-            for i in range(2, min(5, X.shape[0])):
-                ax[1].plot(t[:frame+1], X[i, :frame+1], label=f'Variable {i}', linewidth=2)
-        ax[1].set_xlabel('Time')
-        ax[1].set_ylabel('Concentration')
-        ax[1].set_title('Other Variables')
-        ax[1].legend()
-        ax[1].grid(True, alpha=0.3)
-    else:
-        # Single plot for all variables
-        for i in range(min(5, X.shape[0])):
-            ax[0].plot(t[:frame+1], X[i, :frame+1], label=f'Variable {i}', linewidth=2)
-        ax[0].set_xlabel('Time')
-        ax[0].set_ylabel('Value')
-        ax[0].set_title(f'All Variables (t = {t[frame]:.3f})')
-        ax[0].legend()
-        ax[0].grid(True, alpha=0.3)
-    
-    return ax
+    N = X.shape[0]  # number of components in the solution/state
+
+    # Clear the axes for animation
+    ax[0].cla()  # Clear the top plot
+    ax[1].cla()  # Clear the bottom plot (if N > 1)
+
+    # Top figure shows the intermediate progress of all solution components vs iteration index
+    ax[0].plot(np.reshape(t[:n+1], [n+1]), np.reshape(X[:, :n+1], [N, n+1]).T, ".b")
+    ax[0].set_xlabel("Time or Iteration Index")
+    ax[0].set_ylabel("x")
+
+    if N > 1:
+        # Bottom part shows all component values of the current solution
+        ax[1].plot(X[:, n], ".b")
+        minX = np.min(X)
+        maxX = np.max(X)
+        if maxX == minX:
+            if maxX == 0:
+                minX = -1
+                maxX = 1
+            else:
+                minX = min(minX * 0.9, minX * 1.1)
+                maxX = max(minX * 0.9, minX * 1.1)
+
+        maxh = X.shape[0]
+
+        if maxh == 1:
+            maxh = 2
+
+        ax[1].set_xlim(0, maxh)
+        ax[1].set_ylim(minX, maxX)
+        ax[1].set_xlabel("State Components Index")
+        ax[1].set_ylabel("x")

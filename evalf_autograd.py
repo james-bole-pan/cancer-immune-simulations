@@ -68,7 +68,7 @@ def evalf_autograd(x, p: Params, u):
             del_t8 = (lt8 / (1 + rl * p8 * c / kq) - dt8) * t8 + D_t8 * t8n
             del_ig = ligt8 * t8 - dig * ig + D_ig * ign
             del_p8 = (p8 / (t8 + eps_div)) * del_t8 - mu_a * p8 * a
-            del_a  = ra - (mu_a * p8 - da) * a + D_a * an
+            del_a  = ra - mu_a * p8 * a - da * a + D_a * an
 
             row_vals.append(anp.stack([del_c, del_t8, del_ig, del_p8, del_a]))
         f_val.append(anp.stack(row_vals))

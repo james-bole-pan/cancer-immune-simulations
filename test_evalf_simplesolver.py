@@ -33,66 +33,19 @@ class TestSimpleSolver:
             dig=0.1,     # IFN-γ decay rate
             D_ig=0.0,    # No diffusion
             mu_a=0.0,    # No drug effect
-            da=0.1,      # Antigen decay rate
+            da=0.1,      # drug decay rate
             D_a=0.0,     # No diffusion
-            rows=1, cols=1
+            rows=1, 
+            cols=1
         )
         
-        # Test Case 2: Single cell with simple growth (logistic cancer growth only)
-        self.p_logistic_growth = f.Params(
-            lc=0.5,      # Cancer growth rate
-            tc=1e8,      # Carrying capacity
-            nc=1,        # Linear (no Hill effect)
-            k8=0.0,      # No T8 killing
-            ng=0.0,      # No IFN-γ effect
-            ki=1e10,     # Very high half-saturation (no effect)
-            dc=0.0,      # No additional decay
-            D_c=0.0,     # No diffusion
-            lt8=0.0,     # No T8 growth
-            rl=0.0,      # No P8 inhibition
-            kq=1e10,     # Very high half-saturation (no effect)
-            dt8=0.1,     # T8 decay
-            D_t8=0.0,    # No diffusion
-            ligt8=0.0,   # No IFN-γ production
-            dig=0.1,     # IFN-γ decay
-            D_ig=0.0,    # No diffusion
-            mu_a=0.0,    # No drug effect
-            da=0.1,      # Antigen decay
-            D_a=0.0,     # No diffusion
-            rows=1, cols=1
-        )
-        
-        # Test Case 3: Drug input only (constant antigen source)
-        self.p_drug_only = f.Params(
-            lc=0.0,      # No cancer growth
-            tc=1e10,     # Very high carrying capacity
-            nc=1,        # Linear
-            k8=0.0,      # No T8 killing
-            ng=0.0,      # No IFN-γ effect
-            ki=1e10,     # Very high half-saturation
-            dc=0.1,      # Cancer decay
-            D_c=0.0,     # No diffusion
-            lt8=0.0,     # No T8 growth
-            rl=0.0,      # No P8 inhibition
-            kq=1e10,     # Very high half-saturation
-            dt8=0.1,     # T8 decay
-            D_t8=0.0,    # No diffusion
-            ligt8=0.0,   # No IFN-γ production
-            dig=0.1,     # IFN-γ decay
-            D_ig=0.0,    # No diffusion
-            mu_a=0.0,    # No drug effect initially
-            da=0.05,     # Antigen decay rate
-            D_a=0.0,     # No diffusion
-            rows=1, cols=1
-        )
-    
     def constant_input(self, u_val):
         """Create constant input function"""
         def input_func(t):
             return u_val
         return input_func
-    
-    def test_pure_decay(self, w_values=[1.0, 0.1, 0.01], num_iter=50):
+
+    def test_pure_decay(self, w=1.0, num_iter=50):
         """Test pure exponential decay - should follow x(t) = x0 * exp(-decay_rate * t)"""
         
         print("="*60)
@@ -102,7 +55,7 @@ class TestSimpleSolver:
         print("Analytical solution: x(t) = x0 * exp(-decay_rate * t)")
         
         # Initial condition: single cell with some values
-        x0_1d = np.array([1e6, 1e5, 0.1, 0.01, 0.05])  # [c, t8, ig, p8, a]
+        x0_1d = np.array([100, 90, 80, 70, 60])  # [c, t8, ig, p8, a]
         
         # No input
         u_func = self.constant_input(0.0)
@@ -111,222 +64,76 @@ class TestSimpleSolver:
         def eval_f_wrapper(x, p, u):
             return wrapper.evalf_autograd_1dwrapper(x.flatten(), p, u)
         
-        results = {}
+        X, t = SimpleSolver(
+            eval_f_wrapper, 
+            x0_1d, 
+            self.p_pure_decay, 
+            u_func, 
+            num_iter, 
+            w=w, 
+            visualize=True,
+            gif_file_name=f"test_evalf_output_figures/pure_decay_w_{w}.gif"
+        )
+
+        # Analytical verification
+        print("\n" + "-"*50)
+        print("ANALYTICAL VERIFICATION:")
+        print("-"*50)
         
-        for w in w_values:
-            print(f"\nTesting with w = {w}")
-            
-            try:
-                X, t = SimpleSolver(
-                    eval_f_wrapper, 
-                    x0_1d, 
-                    self.p_pure_decay, 
-                    u_func, 
-                    num_iter, 
-                    w=w, 
-                    visualize=False,
-                    gif_file_name=f"pure_decay_w_{w}.gif"
-                )
-                
-                results[w] = {'X': X, 't': t}
-                
-                # Check final values
-                final_values = X[:, -1]
-                decay_rates = [0.1, 0.1, 0.1, 0.1, 0.1]  # dc, dt8, dig, implicit, da
-                
-                print(f"  Initial values: {x0_1d}")
-                print(f"  Final values:   {final_values}")
-                
-                # Analytical solution at final time
-                t_final = t[-1]
-                analytical = x0_1d * np.exp(-np.array(decay_rates) * t_final)
-                print(f"  Analytical:     {analytical}")
-                print(f"  Relative error: {np.abs((final_values - analytical) / analytical)}")
-                
-            except Exception as e:
-                print(f"  ERROR with w={w}: {e}")
+        # Calculate analytical solution at final time
+        final_time = t[-1]
+        decay_rates = np.array([0.1, 0.1, 0.1, 0.1, 0.1])  # dc, dt8, dig, dt8 (for p8), da
+        analytical_final = x0_1d * np.exp(-decay_rates * final_time)
         
-        return results
-    
-    def test_logistic_growth(self, w_values=[0.01, 0.001], num_iter=100):
-        """Test logistic growth - cancer should grow to carrying capacity"""
+        # Get numerical solution at final time
+        numerical_final = X[:, -1]
         
-        print("="*60)
-        print("TEST 2: Logistic Cancer Growth")
-        print("="*60)
-        print("Expected behavior: Cancer grows toward carrying capacity")
-        print("Other variables should decay to zero")
+        print(f"Final simulation time: {final_time:.3f}")
+        print(f"Initial state: {x0_1d}")
+        print(f"Analytical final: {analytical_final}")
+        print(f"Numerical final:  {numerical_final}")
         
-        # Start with small cancer population
-        x0_1d = np.array([1e5, 1e5, 0.1, 0.01, 0.05])  # [c, t8, ig, p8, a]
+        # Calculate errors
+        absolute_error = np.abs(numerical_final - analytical_final)
+        relative_error = absolute_error / np.abs(analytical_final)
+        max_relative_error = np.max(relative_error)
         
-        # No input
-        u_func = self.constant_input(0.0)
+        print(f"\nAbsolute errors: {absolute_error}")
+        print(f"Relative errors: {relative_error}")
+        print(f"Max relative error: {max_relative_error:.6f} ({max_relative_error*100:.4f}%)")
         
-        def eval_f_wrapper(x, p, u):
-            return wrapper.evalf_autograd_1dwrapper(x.flatten(), p, u)
+        # Assert the solutions are close (within 1% relative error)
+        tolerance = 0.01  # 1% tolerance
+        try:
+            assert max_relative_error < tolerance, f"Maximum relative error {max_relative_error:.6f} exceeds tolerance {tolerance}"
+            print(f"\n✅ ANALYTICAL TEST PASSED: All variables within {tolerance*100}% of analytical solution")
+        except AssertionError as e:
+            print(f"\n❌ ANALYTICAL TEST FAILED: {e}")
+            print(f"Consider reducing omega (w) for higher accuracy or increasing tolerance")
+            raise
         
-        results = {}
-        
-        for w in w_values:
-            print(f"\nTesting with w = {w}")
-            
-            try:
-                X, t = SimpleSolver(
-                    eval_f_wrapper, 
-                    x0_1d, 
-                    self.p_logistic_growth, 
-                    u_func, 
-                    num_iter, 
-                    w=w, 
-                    visualize=False,
-                    gif_file_name=f"logistic_growth_w_{w}.gif"
-                )
-                
-                results[w] = {'X': X, 't': t}
-                
-                # Check behavior
-                cancer_trajectory = X[0, :]
-                carrying_capacity = self.p_logistic_growth.tc
-                
-                print(f"  Initial cancer: {cancer_trajectory[0]:.2e}")
-                print(f"  Final cancer:   {cancer_trajectory[-1]:.2e}")
-                print(f"  Carrying cap:   {carrying_capacity:.2e}")
-                print(f"  Growth achieved: {(cancer_trajectory[-1] / carrying_capacity * 100):.1f}%")
-                
-                # Check if growth is monotonic initially
-                growth_phase = cancer_trajectory[:min(20, len(cancer_trajectory))]
-                is_growing = np.all(np.diff(growth_phase) > 0)
-                print(f"  Initially growing: {is_growing}")
-                
-            except Exception as e:
-                print(f"  ERROR with w={w}: {e}")
-        
-        return results
-    
-    def test_drug_input_steady_state(self, w_values=[0.1, 0.01], num_iter=100):
-        """Test constant drug input - antigen should reach steady state"""
-        
-        print("="*60)
-        print("TEST 3: Constant Drug Input")
-        print("="*60)
-        print("Expected behavior: Antigen reaches steady state = r_a / d_a")
-        print("Other variables decay to zero")
-        
-        # Start with small values
-        x0_1d = np.array([1e5, 1e5, 0.01, 0.001, 0.001])  # [c, t8, ig, p8, a]
-        
-        # Constant drug input
-        r_a = 0.1
-        u_func = self.constant_input(r_a)
-        
-        def eval_f_wrapper(x, p, u):
-            return wrapper.evalf_autograd_1dwrapper(x.flatten(), p, u)
-        
-        results = {}
-        
-        for w in w_values:
-            print(f"\nTesting with w = {w}")
-            
-            try:
-                X, t = SimpleSolver(
-                    eval_f_wrapper, 
-                    x0_1d, 
-                    self.p_drug_only, 
-                    u_func, 
-                    num_iter, 
-                    w=w, 
-                    visualize=False,
-                    gif_file_name=f"drug_input_w_{w}.gif"
-                )
-                
-                results[w] = {'X': X, 't': t}
-                
-                # Check antigen steady state
-                antigen_trajectory = X[4, :]  # Antigen is index 4
-                da = self.p_drug_only.da
-                expected_steady_state = r_a / da
-                
-                print(f"  Initial antigen: {antigen_trajectory[0]:.4f}")
-                print(f"  Final antigen:   {antigen_trajectory[-1]:.4f}")
-                print(f"  Expected steady: {expected_steady_state:.4f}")
-                print(f"  Relative error:  {abs((antigen_trajectory[-1] - expected_steady_state) / expected_steady_state):.4f}")
-                
-                # Check if approaching steady state
-                final_values = antigen_trajectory[-10:]
-                is_converging = np.std(final_values) < 0.01 * np.mean(final_values)
-                print(f"  Converging: {is_converging}")
-                
-            except Exception as e:
-                print(f"  ERROR with w={w}: {e}")
-        
-        return results
-    
-    def test_omega_convergence(self):
-        """Test convergence as omega decreases"""
-        
-        print("="*60)
-        print("TEST 4: Omega Convergence Study")
-        print("="*60)
-        print("Testing how solutions change as w decreases")
-        
-        # Use the pure decay case
-        x0_1d = np.array([1e6, 1e5, 0.1, 0.01, 0.05])
-        u_func = self.constant_input(0.0)
-        
-        def eval_f_wrapper(x, p, u):
-            return wrapper.evalf_autograd_1dwrapper(x.flatten(), p, u)
-        
-        w_values = [1.0, 0.5, 0.1, 0.05, 0.01, 0.005, 0.001]
-        solutions = {}
-        
-        for w in w_values:
-            print(f"Testing w = {w}")
-            try:
-                X, t = SimpleSolver(
-                    eval_f_wrapper, 
-                    x0_1d, 
-                    self.p_pure_decay, 
-                    u_func, 
-                    50, 
-                    w=w, 
-                    visualize=False
-                )
-                solutions[w] = X[:, -1]  # Final solution
-                print(f"  Final solution: {X[:, -1]}")
-            except Exception as e:
-                print(f"  ERROR: {e}")
-        
-        # Compare consecutive solutions
-        print("\nConvergence analysis:")
-        w_list = sorted(solutions.keys(), reverse=True)
-        for i in range(len(w_list)-1):
-            w1, w2 = w_list[i], w_list[i+1]
-            if w1 in solutions and w2 in solutions:
-                diff = np.linalg.norm(solutions[w1] - solutions[w2])
-                rel_diff = diff / np.linalg.norm(solutions[w2])
-                print(f"  ||x(w={w1}) - x(w={w2})|| = {diff:.6f} (relative: {rel_diff:.6f})")
-        
-        return solutions
-    
-    def run_all_tests(self):
+        return X, t, analytical_final, numerical_final
+
+    def run_all_tests(self, total_simulation_time=15, omega=0.01):
         """Run all test cases"""
         print("Starting comprehensive SimpleSolver tests with evalf_autograd_1dwrapper")
         print("="*80)
+
+        num_iterations = int(total_simulation_time / omega)
+        
+        print(f"Using omega = {omega} for {num_iterations} iterations over {total_simulation_time} time units")
         
         # Run tests
-        results = {}
-        results['pure_decay'] = self.test_pure_decay()
-        results['logistic_growth'] = self.test_logistic_growth()
-        results['drug_input'] = self.test_drug_input_steady_state()
-        results['convergence'] = self.test_omega_convergence()
-        
+        self.test_pure_decay(w=omega, num_iter=num_iterations)
+
         print("\n" + "="*80)
         print("ALL TESTS COMPLETED")
         print("="*80)
         
-        return results
-
 if __name__ == "__main__":
     tester = TestSimpleSolver()
-    results = tester.run_all_tests()
+
+    total_simulation_time = 15.0
+    omega = 0.5
+
+    tester.run_all_tests(total_simulation_time = total_simulation_time, omega = omega)

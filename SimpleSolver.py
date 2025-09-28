@@ -75,6 +75,6 @@ def SimpleSolver(eval_f, x_start, p, eval_u, NumIter, w=1, visualize=True, gif_f
         )
 
         ani.save(gif_file_name, writer="pillow")
-        plt.show()
+        #plt.show()
         
     return X, t
