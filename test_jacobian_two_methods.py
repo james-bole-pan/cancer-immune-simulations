@@ -2,7 +2,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from eval_f import evalf_autograd, Params
+from eval_f import eval_f, Params
 from eval_Jf_autograd import eval_Jf_autograd
 from eval_Jf_FiniteDifference import eval_Jf_FiniteDifference
 
@@ -24,7 +24,7 @@ p = Params(
 u = 0.0
 
 # --- Autograd Jacobian ---
-J_ad = eval_Jf_autograd(evalf_autograd, x0, p, u)
+J_ad = eval_Jf_autograd(eval_f, x0, p, u)
 
 # --- FD Jacobians for different dx, and error vs dx ---
 dx_values = 10.0 ** np.arange(-16, 1, 0.25)  # from 1e-16 to 1
@@ -32,7 +32,7 @@ errors = []
 
 for dx in dx_values:
     p.dxFD = dx
-    J_fd, _ = eval_Jf_FiniteDifference(evalf_autograd, x0.copy(), p, u)
+    J_fd, _ = eval_Jf_FiniteDifference(eval_f, x0.copy(), p, u)
     err = np.linalg.norm(J_fd - J_ad, ord='fro')
     errors.append(err)
 

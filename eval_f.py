@@ -17,7 +17,7 @@ class Params:
                 self.lambda_T, self.K_R, self.d_T, self.k_A, self.K_A, self.D_T,
                 self.d_A, self.rows, self.cols)
 
-def evalf_autograd(x_col, p: Params, r_A):
+def eval_f(x_col, p: Params, r_A):
     """
     x_col: (N, 1) column vector with N = rows*cols*3, storing [C, T, A] per grid cell in row-major order.
     returns: (N, 1) column vector of time-derivatives in the same layout.
