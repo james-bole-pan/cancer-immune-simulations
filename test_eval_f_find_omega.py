@@ -6,7 +6,9 @@ for logistic tumor growth on a 3x3 grid using SimpleSolver + eval_f.
 We compare the numerical total tumor count across the grid against
 the analytical logistic solution summed over all 9 cells.
 
-Omegas tested: 5, 2, 1, 0.5, 0.2, 0.1, 0.01
+We want to find the omega that would give us numerical instability, 
+as well as the omega that gives us a good balance of accuracy (given
+the required accuracy for the clinical setting) and efficiency.
 """
 
 import numpy as np
@@ -27,7 +29,7 @@ def analytical_logistic_total(t, C0, lam, K, n_cells):
     return n_cells * C_single
 
 
-def run_case_for_omega(omega, total_days=60.0, visualize=False):
+def run_case_for_omega(omega, total_days=84.0, visualize=False):
     """
     Run SimpleSolver with step size omega and return trajectory errors:
       - relative L2 error over the whole trajectory
@@ -100,7 +102,7 @@ def run_case_for_omega(omega, total_days=60.0, visualize=False):
 
 
 def main():
-    omegas = [5.0, 2.0, 1.0, 0.5, 0.2, 0.1, 0.01]
+    omegas = [7.0, 6.0, 5.0, 2.0, 1.0, 0.5, 0.2, 0.1, 0.01]
     total_days = 84
     results = []
 

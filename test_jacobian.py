@@ -27,13 +27,13 @@ class Test_jacobian:
         
         # Initialize with reasonable values
         for i in range(n_cells):
-            self.x0_basic[i*3 + 0, 0] = 1.0e4  # Cancer cells (scaled down from original)
-            self.x0_basic[i*3 + 1, 0] = 1.0e3  # T cells (scaled down)
-            self.x0_basic[i*3 + 2, 0] = 0.015  # Drug concentration
+            self.x0_basic[i*3 + 0, 0] = 15  # Cancer cells (scaled down from original)
+            self.x0_basic[i*3 + 1, 0] = 2  # T cells (scaled down)
+            self.x0_basic[i*3 + 2, 0] = 0  # Drug concentration
         
         # Standard drug input function
         # Use scalar input for Jacobian computation (evaluated at t=0)
-        self.u_standard = 0.015
+        self.u_standard = 200
 
     def test_plot_jacobian(self):
         """Test Jacobian computation and create heatmap visualization"""
@@ -163,10 +163,10 @@ class Test_jacobian:
             n_cells = n_x * n_y
             x_test = np.zeros((n_cells * 3, 1))
             for i in range(n_cells):
-                x_test[i*3 + 0, 0] = 1.0e4  # Cancer cells
-                x_test[i*3 + 1, 0] = 1.0e5  # T cells  
-                x_test[i*3 + 2, 0] = 10.0   # Drug concentration
-            
+                x_test[i*3 + 0, 0] = 15  # Cancer cells
+                x_test[i*3 + 1, 0] = 2  # T cells
+                x_test[i*3 + 2, 0] = 0.0  # Drug concentration
+
             J = eval_Jf_autograd(f.eval_f, x_test, p_test, self.u_standard)
             
             expected_size = n_x * n_y * 3  # 3 variables per cell
