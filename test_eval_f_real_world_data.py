@@ -11,7 +11,7 @@ class TestEvalF_RealWorldData:
     def __init__(self):
         self.p_default = Params(
             lambda_C=0.33, K_C=28, d_C=0.01, k_T=4, K_K=5, D_C=0.01,
-            lambda_T=3.0, K_R=10, d_T=0.01, k_A=0.16, K_A=100, D_T=0.1,
+            lambda_T=3.0, K_T=10, K_R=10, d_T=0.01, k_A=0.16, K_A=100, D_T=0.1,
             d_A=0.0315, rows=1, cols=1
         )
         self.figure_dir = "test_evalf_output_figures/"

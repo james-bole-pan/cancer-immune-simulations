@@ -42,7 +42,7 @@ def run_case_for_omega(omega, total_days=84.0, visualize=False):
     # Params: only logistic tumor growth active
     p = Params(
         lambda_C=0.33, K_C=28.0, d_C=0.0, k_T=0.0, K_K=1.0, D_C=0.0,
-        lambda_T=0.0, K_R=1.0, d_T=0.0, k_A=0.0, K_A=1.0, D_T=0.0,
+        lambda_T=0.0, K_T=10.0, K_R=1.0, d_T=0.0, k_A=0.0, K_A=1.0, D_T=0.0,
         d_A=0.0, rows=rows, cols=cols
     )
 
@@ -138,7 +138,7 @@ def main():
     plt.grid(alpha=0.4)
     plt.tight_layout()
     plt.savefig("test_evalf_output_figures/logistic_3x3_different_omega_trajectory_plot.png")
-    plt.show()
+    #plt.show()
 
     # --- Error convergence plot ---
     ws = np.array([r["omega"] for r in results if np.isfinite(r["rel_L2"])])
@@ -153,7 +153,7 @@ def main():
         plt.grid(True, which="both", alpha=0.4)
         plt.tight_layout()
         plt.savefig("test_evalf_output_figures/logistic_3x3_different_omega_error_plot.png")
-        plt.show()
+        #plt.show()
 
 if __name__ == "__main__":
     main()

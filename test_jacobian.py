@@ -210,7 +210,7 @@ class Test_jacobian:
                 
                 # For larger matrices, use condition number instead of determinant
                 condition_num = np.linalg.cond(jacobian)
-                is_well_conditioned = condition_num < 1e12  # Reasonable condition number
+                is_well_conditioned = condition_num < 1e6  # Reasonable condition number
                 
                 print(f"Test {i+1}: Condition number = {condition_num:.2e}")
                 results.append(is_well_conditioned)

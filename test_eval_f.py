@@ -9,7 +9,7 @@ class TestEvalF:
     def __init__(self):
         self.p_default = Params(
             lambda_C=0.33, K_C=28, d_C=0.01, k_T=4, K_K=5, D_C=0.01,
-            lambda_T=3.0, K_R=10, d_T=0.01, k_A=0.16, K_A=100, D_T=0.1,
+            lambda_T=3.0, K_T=10, K_R=10, d_T=0.01, k_A=0.16, K_A=100, D_T=0.1,
             d_A=0.0315, rows=1, cols=1
         )
         self.figure_dir = "test_evalf_output_figures/"
@@ -193,8 +193,8 @@ class TestEvalF:
         p = copy.deepcopy(self.p_default)
 
         p.lambda_C = 0; p.d_C = 0; p.D_C = 0
-        p.lambda_T = 0; p.d_T = 0; p.k_A = 0; p.D_T = 0
-        p.d_A = 0
+        p.lambda_T = 0; p.d_T = 0; p.k_A = 0; p.D_T = 0; p.K_K = 500
+        p.d_A = 0; 
 
         rows, cols = 3, 3
         p.rows = rows
@@ -282,7 +282,7 @@ class TestEvalF:
 
         # analytical per-cell slope
         r = p.lambda_T * (C0 / (C0 + p.K_R))
-        T_analytical_single = T0 + r * t
+        T_analytical_single = p.K_T + (T0 - p.K_T) * np.exp((-r/p.K_T) * t)
 
         # total analytical = 9 cells
         T_analytical_total = n_cells * T_analytical_single

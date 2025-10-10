@@ -2,11 +2,11 @@ import autograd.numpy as anp
 
 class Params:
     def __init__(self, lambda_C, K_C, d_C, k_T, K_K, D_C,
-                       lambda_T, K_R, d_T, k_A, K_A, D_T,
+                       lambda_T, K_T, K_R, d_T, k_A, K_A, D_T, 
                        d_A, rows, cols, dxFD=None):
         self.lambda_C = lambda_C; self.K_C = K_C; self.d_C = d_C
         self.k_T = k_T; self.K_K = K_K; self.D_C = D_C
-        self.lambda_T = lambda_T; self.K_R = K_R; self.d_T = d_T
+        self.lambda_T = lambda_T; self.K_T = K_T; self.K_R = K_R; self.d_T = d_T
         self.k_A = k_A; self.K_A = K_A; self.D_T = D_T
         self.d_A = d_A
         self.rows = rows; self.cols = cols
@@ -14,7 +14,7 @@ class Params:
 
     def tuple(self):
         return (self.lambda_C, self.K_C, self.d_C, self.k_T, self.K_K, self.D_C,
-                self.lambda_T, self.K_R, self.d_T, self.k_A, self.K_A, self.D_T,
+                self.lambda_T, self.K_T, self.K_R, self.d_T, self.k_A, self.K_A, self.D_T,
                 self.d_A, self.rows, self.cols)
 
 def eval_f(x_col, p: Params, r_A):
@@ -23,7 +23,7 @@ def eval_f(x_col, p: Params, r_A):
     returns: (N, 1) column vector of time-derivatives in the same layout.
     """
     (lambda_C, K_C, d_C, k_T, K_K, D_C,
-     lambda_T, K_R, d_T, k_A, K_A, D_T,
+     lambda_T, K_T, K_R, d_T, k_A, K_A, D_T,
      d_A, rows, cols) = p.tuple()
 
     # ---- reshape (N,1) -> (rows, cols, 3) ----
@@ -60,7 +60,7 @@ def eval_f(x_col, p: Params, r_A):
 
             # CD8: recruitment - decay + drug-boosted survival/prolif + diffusion
             drug_boost = (k_A * A) / (A + K_A + eps)  # per-day per-T
-            dT = (lambda_T * (C / (C + K_R + eps))
+            dT = (lambda_T * (C / (C + K_R + eps)) * (1.0 - T / (K_T + eps))
                   - d_T * T
                   + drug_boost * T
                   + D_T * laplacian4(x, i, j, 1))
