@@ -33,18 +33,45 @@ class sparsity_analysis:
 
         J = eval_Jf_autograd(f.eval_f, self.x0_basic, self.p_standard, self.u_standard)
 
+        cond_num = np.linalg.cond(J)
+        print(f"Condition number of Jacobian: {cond_num:.2e}")
         sparsity = self.analyze_sparsity(J)
         print(f"Sparsity (fraction of non-zero elements): {sparsity:.2%}")
 
-        self.plot_jacobian_heatmap(J, sparsity, outdir="pm2_output_figures")
+        self.plot_jacobian_heatmap(J, sparsity, cond_num, outdir="pm2_output_figures", title_suffix=f"Original Ordering (CTACTA)", figname_suffix=f"original_ordering")
         
+        perm = self.build_alternative_ordering(rows, cols, var_order=("C","T","A"))
+        J_alternative = J[np.ix_(perm, perm)]
+        sparsity_alternative = self.analyze_sparsity(J_alternative)
+        cond_alternative = np.linalg.cond(J_alternative)
+
+        self.plot_jacobian_heatmap(
+            J_alternative, sparsity_alternative, cond_alternative, outdir="pm2_output_figures",
+            title_suffix="Alternative Ordering (CCTTAA)", figname_suffix="alternative_ordering"
+        )
+
     def analyze_sparsity(self, J, tol=1e-12):
         total_elements = J.size
         nonzero_elements = np.sum(np.abs(J) > tol)
         sparsity = (nonzero_elements / total_elements)
         return sparsity
+    
+    def build_alternative_ordering(self, rows, cols, var_order=("C","T","A")):
+        """
+        For original layout per cell: [C, T, A] repeated for each cell,
+        return a permutation that reorders the state as [C...C | T...T | A...A]
+        (or any var_order provided).
+        """
+        n_cells = rows * cols
+        var_to_offset = {"C": 0, "T": 1, "A": 2}  # original per-cell offsets
+        perm = []
+        for v in var_order:
+            k = var_to_offset[v]
+            # positions of variable v across all cells in the original vector
+            perm.extend([i*3 + k for i in range(n_cells)])
+        return np.array(perm, dtype=int)
 
-    def plot_jacobian_heatmap(self, J, sparsity, outdir, tol=1e-12):
+    def plot_jacobian_heatmap(self, J, sparsity, cond_num, outdir, tol=1e-12, title_suffix="", figname_suffix=""):
         sign_mat = np.zeros_like(J, dtype=int)
         sign_mat[J >  tol] =  1
         sign_mat[J < -tol] = -1
@@ -82,8 +109,16 @@ class sparsity_analysis:
         axes[1].set_ylabel("Row (effect)")
         fig.colorbar(imB, ax=axes[1])
 
-        fig.suptitle(f"Jacobian Heatmaps ({J.shape[0]}×{J.shape[1]}); Percentage of Non-Zero Elements: {sparsity:.2%}", y=1.02, fontsize=12)
-        fig.savefig(os.path.join(outdir, f"jacobian_heatmap_{J.shape[0]}.png"), dpi=150, bbox_inches="tight")
+        fig.suptitle(
+            f"Jacobian Heatmaps ({J.shape[0]}×{J.shape[1]}) | "
+            f"Non-Zero: {sparsity:.2%} | "
+            f"Cond #: {cond_num:.2e} |"
+            f" {title_suffix}",
+            y=1.1,
+            fontsize=12
+        )
+
+        fig.savefig(os.path.join(outdir, f"jacobian_heatmap_{J.shape[0]}_{figname_suffix}.png"), dpi=150, bbox_inches="tight")
         plt.close(fig)
 
     def run(self):
