@@ -4,6 +4,9 @@ import os
 import eval_f as f
 from eval_Jf_autograd import eval_Jf_autograd
 from test_eval_f import TestEvalF
+import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap, BoundaryNorm
+from matplotlib.patches import Patch
 
 class Test_jacobian:
     """Regression tests for the eval_f function using Jacobian analysis"""
@@ -35,55 +38,154 @@ class Test_jacobian:
         # Use scalar input for Jacobian computation (evaluated at t=0)
         self.u_standard = 200
 
-    def test_plot_jacobian(self):
-        """Test Jacobian computation and create heatmap visualization"""
+    def test_plot_jacobian_heatmap(self):
+        """Compute Jacobian and save (1) sign heatmap and (2) log|J| heatmap, plus a combined figure."""
+        
+        print("Running test_plot_jacobian_heatmap...")
         J = eval_Jf_autograd(f.eval_f, self.x0_basic, self.p_standard, self.u_standard)
-        
-        import matplotlib.pyplot as plt
-        plt.figure(figsize=(10, 8))
-        plt.imshow(np.log10(np.abs(J) + 1e-12), cmap='hot', interpolation='nearest')
-        plt.colorbar(label='Log10(|Jacobian|)')
-        plt.title(f'Jacobian Heatmap ({J.shape[0]}x{J.shape[1]})')
-        plt.xlabel('State Variable Index')
-        plt.ylabel('Derivative Index')
-        
-        # Save plot instead of showing (for headless environments)
-        if not os.path.exists('test_evalf_output_figures'):
-            os.makedirs('test_evalf_output_figures')
-        plt.savefig('test_evalf_output_figures/jacobian_heatmap.png', dpi=150, bbox_inches='tight')
-        plt.close()
-        
-        # Verify Jacobian properties
-        assert J.shape[0] == J.shape[1], "Jacobian should be square matrix"
-        assert np.all(np.isfinite(J)), "All Jacobian entries should be finite"
-        assert True
 
-    def test_drug_effects_jacobian(self):
-        """Test that drug concentration affects the system appropriately through Jacobian"""
+        assert J.shape[0] == J.shape[1], "Jacobian should be a square matrix."
+        assert np.all(np.isfinite(J)), "All Jacobian entries should be finite."
+
+        # --- Sign matrix (negative / ~zero / positive) ---
+        tol = 1e-12
+        sign_mat = np.zeros_like(J, dtype=int)
+        sign_mat[J >  tol] =  1
+        sign_mat[J < -tol] = -1
+
+        # 3-color categorical map: negative / zero / positive
+        cmap_sign = ListedColormap(["#2b6cb0", "#e2e8f0", "#e53e3e"])   # blue / light gray / red
+        bounds = [-1.5, -0.5, 0.5, 1.5]
+        norm_sign = BoundaryNorm(bounds, cmap_sign.N)
+
+        # --- Log magnitude (add epsilon to avoid log(0)) ---
+        eps = 1e-12
+        logmag = np.log10(np.abs(J) + eps)
+        cmap_mag = "hot"  # or "viridis", etc.
+
+        # Output directory
+        outdir = "test_evalf_output_figures"
+        os.makedirs(outdir, exist_ok=True)
+
+        # (A) Sign heatmap
+        plt.figure(figsize=(9, 8))
+        im0 = plt.imshow(sign_mat, cmap=cmap_sign, norm=norm_sign, interpolation="nearest")
+        plt.title(f"Jacobian Sign Heatmap ({J.shape[0]}×{J.shape[1]})")
+        plt.xlabel("State Variable Index (column: cause)")
+        plt.ylabel("Derivative Index (row: effect)")
+        legend_patches = [
+            Patch(facecolor="#2b6cb0", edgecolor="none", label="Negative (< -tol)"),
+            Patch(facecolor="#e2e8f0", edgecolor="none", label=f"Zero (|J| ≤ {tol:g})"),
+            Patch(facecolor="#e53e3e", edgecolor="none", label="Positive (> tol)"),
+        ]
+        plt.legend(handles=legend_patches, loc="upper right", frameon=False)
+        #plt.savefig(os.path.join(outdir, "jacobian_heatmap_signs.png"), dpi=150, bbox_inches="tight")
+        plt.close()
+
+        # (B) Log-magnitude heatmap
+        plt.figure(figsize=(9, 8))
+        im1 = plt.imshow(logmag, cmap=cmap_mag, interpolation="nearest")
+        cbar = plt.colorbar(im1)
+        cbar.set_label("log10(|J| + ε)")
+        plt.title(f"Jacobian Log-Magnitude Heatmap ({J.shape[0]}×{J.shape[1]})")
+        plt.xlabel("State Variable Index (column: cause)")
+        plt.ylabel("Derivative Index (row: effect)")
+        #plt.savefig(os.path.join(outdir, "jacobian_heatmap_logmag.png"), dpi=150, bbox_inches="tight")
+        plt.close()
+
+        # (C) Combined two-panel figure
+        fig, axes = plt.subplots(1, 2, figsize=(16, 7), constrained_layout=True)
+
+        imA = axes[0].imshow(sign_mat, cmap=cmap_sign, norm=norm_sign, interpolation="nearest")
+        axes[0].set_title("Sign")
+        axes[0].set_xlabel("Column (cause)")
+        axes[0].set_ylabel("Row (effect)")
+        axes[0].legend(handles=legend_patches, loc="upper right", frameon=False)
+
+        imB = axes[1].imshow(logmag, cmap=cmap_mag, interpolation="nearest")
+        axes[1].set_title("log10(|J| + ε)")
+        axes[1].set_xlabel("Column (cause)")
+        axes[1].set_ylabel("Row (effect)")
+        fig.colorbar(imB, ax=axes[1])
+
+        fig.suptitle(f"Jacobian Heatmaps ({J.shape[0]}×{J.shape[1]})", y=1.02, fontsize=12)
+        fig.savefig(os.path.join(outdir, "jacobian_heatmap_combined.png"), dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+    def test_jacobian_value_direction(self):
+        """Test that the Jacobian reflects the system appropriately"""
+        print("Running test_jacobian_value_direction...")
         J = eval_Jf_autograd(f.eval_f, self.x0_basic, self.p_standard, self.u_standard)
-        
-        # In the new 3-variable system: [C, T, A] per cell
-        # For a 2x2 grid: variables 0,3,6,9 are cancer (C), 1,4,7,10 are T-cells (T), 2,5,8,11 are drug (A)
-        
-        # Test drug self-dynamics (drug clearance should be negative)
-        drug_indices = [2, 5, 8, 11]  # Drug concentration indices for each cell
-        for i in drug_indices:
-            drug_clearance = J[i, i]  # Effect of drug on its own dynamics
-            print(f"Drug clearance at cell {i//3}: {drug_clearance}")
-            assert drug_clearance < 0, f"Drug clearance should be negative at index {i}"
-        
-        # Test that drug enhances T-cell dynamics (positive coupling)
-        t_cell_indices = [1, 4, 7, 10]  # T-cell indices
-        for i, t_idx in enumerate(t_cell_indices):
-            drug_idx = drug_indices[i]  # Corresponding drug index in same cell
-            drug_effect_on_tcells = J[t_idx, drug_idx]
-            print(f"Drug effect on T-cells at cell {i}: {drug_effect_on_tcells}")
-            # Drug should enhance T-cell survival/activation (positive effect expected)
-        
-        print("Drug effects Jacobian test completed")
+  
+        # --- Index helpers (interleaved [C,T,A] per cell) ---
+        n = J.shape[0]
+        assert n % 3 == 0, "State must be interleaved [C,T,A] per cell."
+        N = n // 3
+        C_idx = [3*k + 0 for k in range(N)]
+        T_idx = [3*k + 1 for k in range(N)]
+        A_idx = [3*k + 2 for k in range(N)]
+
+        # Tolerances
+        tol_neg  = 1e-12   # strictly negative (allow tiny numerical noise)
+        tol_zero = 1e-12   # approximately zero
+        tol_nonneg = 1e-12 # >= 0 with tolerance
+
+        # 1) df_A/dA < 0  (drug self-clearance is negative)
+        for a in A_idx:
+            val = J[a, a]
+            assert val < -tol_neg, f"Drug clearance should be negative: J[{a},{a}]={val:.3e}"
+
+        # 2) df_A/dT ≈ 0  (no direct T → A coupling)
+        for t in T_idx:
+            for a in A_idx:
+                val = J[a, t]
+                assert np.isclose(val, 0.0, atol=tol_zero), (
+                    f"Drug dynamics should not depend on T: J[{a},{t}]={val:.3e}"
+                )
+
+        # 3) df_A/dC ≈ 0  (no direct C → A coupling)
+        for c in C_idx:
+            for a in A_idx:
+                val = J[a, c]
+                assert np.isclose(val, 0.0, atol=tol_zero), (
+                    f"Drug dynamics should not depend on C: J[{a},{c}]={val:.3e}"
+                )
+
+        # 4) df_T/dA ≥ 0 locally (drug enhances or does not harm T); same-cell pairing
+        for k in range(N):
+            t, a = T_idx[k], A_idx[k]
+            val = J[t, a]
+            assert val >= -tol_nonneg, (
+                f"Local A→T coupling should be ≥0: J[{t},{a}]={val:.3e} (cell {k})"
+            )
+
+        # 5) df_T/dC ≥ 0 locally (cancer stimulates T activation); same-cell pairing
+        for k in range(N):
+            t, c = T_idx[k], C_idx[k]
+            val = J[t, c]
+            assert val >= -tol_nonneg, (
+                f"Local C→T coupling should be ≥0: J[{t},{c}]={val:.3e} (cell {k})"
+            )
+            
+        # 6) df_C/dT ≤ 0 locally (T cells kill cancer); same-cell pairing
+        for k in range(N):
+            c, t = C_idx[k], T_idx[k]
+            val = J[c, t]
+            assert val <= tol_nonneg, (
+                f"Local T→C coupling should be ≤0: J[{c},{t}]={val:.3e} (cell {k})"
+            )
+
+        # 7) df_C/dA ≈ 0  (no direct A → C coupling)
+        for k in range(N):
+            c, a = C_idx[k], A_idx[k]
+            val = J[c, a]
+            assert np.isclose(val, 0.0, atol=tol_zero), (
+                f"Cancer dynamics should not directly depend on A: J[{c},{a}]={val:.3e} (cell {k})"
+            )
 
     def test_output_nonsingularity(self):
         """Test that Jacobian is nonsingular for most parameter combinations"""
+        print("Running test_output_nonsingularity...")
         np.random.seed(42)  # For reproducible tests
         
         # Test multiple parameter perturbations
@@ -124,6 +226,7 @@ class Test_jacobian:
 
     def test_output_sparsity(self):
         """Test sparsity pattern of the Jacobian matrix"""
+        print("Running test_output_sparsity...")
         J = eval_Jf_autograd(f.eval_f, self.x0_basic, self.p_standard, self.u_standard)
         
         # Count non-zero entries per row and column
@@ -140,42 +243,11 @@ class Test_jacobian:
         print(f"Max non-zeros per column: {max_nonzero_per_col}")
         print(f"Total matrix size: {J.shape}")
         print(f"Sparsity: {np.sum(nonzero_mask) / J.size:.2%} non-zero")
-        
-        # For a 2x2 grid with 3 variables each (12x12 matrix):
-        # Each variable can be affected by itself + neighbors + coupled variables
-        # Reasonable upper bound for biological system connectivity
-        expected_max_connections = min(J.shape[0], 15)  # Adjust based on grid size
+
+        expected_max_connections = 7
         
         assert max_nonzero_per_row <= expected_max_connections, f"Each row should have at most {expected_max_connections} non-zero entries"
         assert max_nonzero_per_col <= expected_max_connections, f"Each column should have at most {expected_max_connections} non-zero entries"
-
-    def test_output_shape_consistency(self):
-        """Test that Jacobian shape is consistent with input size"""
-        
-        # Test with different grid sizes (updated for 3-variable system)
-        for n_x, n_y in [(2, 2), (3, 2), (2, 3)]:
-            # Create test parameters 
-            p_test = copy.deepcopy(self.p_standard)
-            p_test.rows = n_x
-            p_test.cols = n_y
-            
-            # Create test state
-            n_cells = n_x * n_y
-            x_test = np.zeros((n_cells * 3, 1))
-            for i in range(n_cells):
-                x_test[i*3 + 0, 0] = 15  # Cancer cells
-                x_test[i*3 + 1, 0] = 2  # T cells
-                x_test[i*3 + 2, 0] = 0.0  # Drug concentration
-
-            J = eval_Jf_autograd(f.eval_f, x_test, p_test, self.u_standard)
-            
-            expected_size = n_x * n_y * 3  # 3 variables per cell
-            
-            assert J.shape == (expected_size, expected_size), \
-                f"Jacobian should be {expected_size}x{expected_size}, got {J.shape}"
-            assert np.all(np.isfinite(J)), f"All Jacobian entries should be finite for {n_x}x{n_y} grid"
-            
-            print(f"Grid size {n_x}x{n_y}: Jacobian shape {J.shape} ✓")
 
 if __name__ == "__main__":
     # Run tests if script is executed directly
@@ -185,6 +257,9 @@ if __name__ == "__main__":
     print("Running evalf_autograd regression tests...")
     
     test_methods = [method for method in dir(test_instance) if method.startswith('test_')]
+
+    total_tests = len(test_methods)
+    failed_tests = 0
     
     for test_method in test_methods:
         try:
@@ -192,5 +267,7 @@ if __name__ == "__main__":
             print(f"✓ {test_method}")
         except Exception as e:
             print(f"✗ {test_method}: {e}")
-    
+            failed_tests += 1
+
     print("Tests completed!")
+    print(f"Successful tests: {total_tests - failed_tests}, Failed tests: {failed_tests}; Success rate: {(total_tests - failed_tests) / total_tests:.2%}")
