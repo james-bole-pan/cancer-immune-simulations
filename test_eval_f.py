@@ -400,6 +400,83 @@ class TestEvalF:
 
         print(f"TEST PASSED ✅: Drug pulse PK trajectory rel error = {rel_err:.2e}") 
 
+    def test_zero_initial_conditions(self, w, num_iter):
+        p = copy.deepcopy(self.p_default)
+        p.rows, p.cols = 3, 3
+        x0 = np.zeros((p.rows * p.cols * 3, 1))  # Everything starts at 0
+
+        u_func = self.constant_input(0.0)
+
+        X, t = SimpleSolver(
+            eval_f,
+            x_start=x0,
+            p=p,
+            eval_u=u_func,
+            NumIter=num_iter,
+            w=w,
+            visualize=False
+        )
+
+        assert not np.any(np.isnan(X)), "NaNs produced with zero initial condition"
+        assert not np.any(np.isinf(X)), "Infs produced with zero initial condition"
+        print(f"TEST PASSED ✅: Zero initial condition test passed.")
+
+    def test_sim_one_grid(self, w, num_iter):
+        p = copy.deepcopy(self.p_default)
+        # Ensure no spatial effects
+        p.D_C = 0.0
+        p.D_T = 0.0
+        rows, cols = 1, 1 # Use a single cell
+        p.rows = rows
+        p.cols = cols
+        n_cells = rows * cols
+
+        # Initial conditions (all terms are non-zero)
+        C0 = 4
+        T0 = 0.5
+        A0 = 10.0 
+        x0 = np.zeros((n_cells * 3, 1))
+        x0[0::3, 0] = C0 
+        x0[1::3, 0] = T0 
+        x0[2::3, 0] = A0 
+
+        u_func = self.constant_input(0.0) # No drug input, let A decay
+
+        # Run the simulation with the specified step size (w)
+        X, t = SimpleSolver(
+            eval_f,
+            x_start=x0,
+            p=p,
+            eval_u=u_func,
+            NumIter=num_iter,
+            w=w,
+            visualize=True,
+            gif_file_name=f"{self.figure_dir}/sim_one_grid_w_{w}.gif"
+        )
+
+        # Numerical total counts (just C, T, A for the single cell)
+        C_num = X[0, :]
+        T_num = X[1, :]
+        A_num = X[2, :]
+
+        # --- Qualitative Assertions ---
+
+        # A should decay (due to d_A*A, with no r_A input)
+        assert A_num[-1] < A0, "Drug A should decay with d_A > 0 and r_A = 0."
+        
+        # C should grow initially (due to logistic growth > decay/killing)
+        # This assertion is parameter-dependent but a reasonable check for default params
+        # Initial dC/dt should be positive for C0=1.0 with default params
+        initial_dC_dt = eval_f(x0, p, r_A=0.0)[0, 0] # Get the derivative at t=0
+        assert initial_dC_dt > 0, "Initial dC/dt must be positive for C=1, T=0.5, A=10 (default params)."
+
+        # T should grow (due to recruitment/boost > decay)
+        # Initial dT/dt should be positive for C0=1.0, T0=0.5, A0=10.0
+        initial_dT_dt = eval_f(x0, p, r_A=0.0)[1, 0] 
+        assert initial_dT_dt > 0, "Initial dT/dt must be positive for C=1, T=0.5, A=10 (default params)."
+
+        print(f"TEST PASSED ✅: Default parameter dynamics check out (drug decays, initial dC/dt > 0, initial dT/dt > 0) for w={w}")
+
     def run_all_tests(self, w, num_iter):
         self.test_logistic_growth(w, num_iter)
         self.test_pure_decay(w, num_iter)
@@ -408,6 +485,8 @@ class TestEvalF:
         self.test_lambda_T_recruitment(w, num_iter)
         self.test_k_A_drug_boost(w, num_iter)
         self.test_drug_pulses_pk(w, num_iter)
+        self.test_zero_initial_conditions(w, num_iter)
+        self.test_sim_one_grid(w, num_iter)
 
 if __name__ == "__main__":
     tester = TestEvalF()
