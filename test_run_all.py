@@ -4,6 +4,7 @@ from test_eval_f_find_omega import main as sweep_omegas
 from test_eval_f_real_world_data import TestEvalF_RealWorldData
 from test_jacobian import Test_jacobian
 from test_jacobian_two_methods import JacobianComparator
+from test_visualizeNetwork import TestVisualizeNetwork
 
 if __name__ == "__main__":
 
@@ -48,8 +49,10 @@ if __name__ == "__main__":
     print(f"Saved plot to: {path}")
     print(f"dx* (optimal): {info['dx_optimal']:.3e} | dx_machine: {info['dx_machine']:.3e} | dx_nitsol: {info['dx_nitsol']:.3e}")
 
-
-
-
-
-
+    # test_visualizeNetwork.py
+    test_visualize_network = TestVisualizeNetwork()
+    test_visualize_network.setUp()
+    test_visualize_network.test_saves_single_combined_image()
+    test_visualize_network.test_bad_shape_raises()
+    test_visualize_network.test_persistent_output_dir()
+    print("All tests in test_visualizeNetwork.py passed.")
