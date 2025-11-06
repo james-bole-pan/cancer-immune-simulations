@@ -3,6 +3,7 @@ import unittest
 import tempfile
 from pathlib import Path
 import numpy as np
+import copy
 
 from eval_f import Params
 from VisualizeNetwork import visualizeNetwork
@@ -107,6 +108,27 @@ class TestVisualizeNetwork(unittest.TestCase):
         fig.clf()
         print(f"[TEST INFO] Persistent figure saved at: {save_path}")
 
+    def test_fake_data_visualize(self):
+        fake_data_dir = "data/fake_spatial_data_tumor_int.npy"
+        spatial_data = np.load(fake_data_dir)                     # (rows, cols, channels)
+        rows, cols, channels = spatial_data.shape
+
+        p = copy.deepcopy(self.p_default)
+        p.rows = rows
+        p.cols = cols
+
+        x = spatial_data.reshape(rows * cols * channels, 1)  # (n_state, 1)
+
+        outdir = Path("test_evalf_output_figures")
+        outdir.mkdir(parents=True, exist_ok=True)
+
+        visualizeNetwork(
+            x,
+            p,
+            title_prefix="fake_data_test_",
+            output_dir=str(outdir),
+            dpi=200,
+        )
 
 if __name__ == "__main__":
     unittest.main()

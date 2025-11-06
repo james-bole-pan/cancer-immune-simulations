@@ -55,4 +55,5 @@ if __name__ == "__main__":
     test_visualize_network.test_saves_single_combined_image()
     test_visualize_network.test_bad_shape_raises()
     test_visualize_network.test_persistent_output_dir()
+    test_visualize_network.test_fake_data_visualize()
     print("All tests in test_visualizeNetwork.py passed.")
