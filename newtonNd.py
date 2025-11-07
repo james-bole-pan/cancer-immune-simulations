@@ -2,6 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from visualize_state import visualize_state 
 from eval_Jf_FiniteDifference import eval_Jf_FiniteDifference 
+from scipy.sparse import csc_matrix
+from scipy.sparse.linalg import spsolve
 
 def newtonNd(fhand, x0, p, u,errf,errDeltax,relDeltax,MaxIter,visualize, FiniteDifference, Jfhand):
     """
@@ -52,19 +54,40 @@ def newtonNd(fhand, x0, p, u,errf,errDeltax,relDeltax,MaxIter,visualize, FiniteD
             x_col = X[:,k].reshape(-1,1)
             Jf,_ = eval_Jf_FiniteDifference(fhand,x_col,p,u)
         else: 
+            print(f"[DEBUG] Computing Jacobian at iteration {k}")
             Jf = Jfhand(fhand, X[:,k],p,u)
+        print(f"[DEBUG] Jacobian Jf at iteration {k}:\n{Jf}")
+
+        # create a heatmap of the Jacobian for visualization
+        visualize_Jacobian = False
+        if visualize and visualize_Jacobian:
+            ax_bottom.clear()
+            cax = ax_bottom.matshow(Jf, cmap='viridis')
+            fig.colorbar(cax, ax=ax_bottom)
+            ax_bottom.set_title(f'Jacobian Matrix at Iteration {k}')
+            plt.show()
 
         detJ = np.linalg.det(Jf)
         rankJ = np.linalg.matrix_rank(Jf)
         condJ = np.linalg.cond(Jf)
+        eigenvalues = np.linalg.eigvals(Jf)
 
+        #print(f"[DEBUG] Eigenvalues of Jf: {eigenvalues}")
         print(f"[DEBUG] det(Jf)={detJ:.2e}, rank={rankJ}/{Jf.shape[0]}, cond={condJ:.2e}")
 
         if rankJ < Jf.shape[0] or not np.isfinite(detJ) or abs(detJ) < 1e-12 or condJ > 1e12:
             print(f"[WARNING] Singular or ill-conditioned Jacobian detected at iteration {k}.")
             Jf = Jf + 1e-6 * np.eye(Jf.shape[0])
 
-        Deltax = np.linalg.solve(Jf, -f)       #NOTE this is the only difference from 1D to multiD
+        sparse_solve_flag = True
+
+        if sparse_solve_flag:
+            Jf_sparse = csc_matrix(Jf)
+            print(f"Sparse matrix: {Jf_sparse}")
+            Deltax = spsolve(Jf_sparse, -f)
+        else:
+            Deltax = np.linalg.solve(Jf, -f)       #NOTE this is the only difference from 1D to multiD
+
         Deltax = Deltax.flatten()
         X[:, k+1] = X[:,k] + Deltax
         k = k+1

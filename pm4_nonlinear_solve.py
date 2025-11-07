@@ -55,8 +55,9 @@ class RunPM4NonlinearSolve:
         print(' ')
         print('Solving with provided eval_Jf Jacobian function')
         FiniteDifference=0;  
+        c = 3
         x_AnalyticJacobian,converged,errf_k,errDeltax_k,relDeltax_k,iterations,X_an = newtonNd(
-            self.eval_f,
+            lambda x, p, u: c * self.eval_f(x, p, u),
             x0,
             p,
             self.u,
@@ -66,7 +67,7 @@ class RunPM4NonlinearSolve:
             self.MaxIter,
             self.visualize,
             FiniteDifference,
-            self.eval_Jf)
+            lambda eval_f, x, p, u: c * self.eval_Jf(eval_f, x, p, u))
         plt.title('Intermediate Newton Solutions with provided eval Jf function')
         plt.show()
         print(f"Errors after {iterations} iterations: errf_k={errf_k}, errDeltax_k={errDeltax_k}, relDeltax_k={relDeltax_k}")
@@ -76,7 +77,7 @@ class RunPM4NonlinearSolve:
         
 
     def run_nonlinear_solve_3x3_default(self):
-        print("Running nonlinear solve test for logistic growth model:")
+        print("Running nonlinear solve test for 3x3 default model:")
         p = copy.deepcopy(self.p_default)
 
         # --- grid setup ---
@@ -100,8 +101,9 @@ class RunPM4NonlinearSolve:
         print(' ')
         print('Solving with provided eval_Jf Jacobian function')
         FiniteDifference=0;  
+        c = 3
         x_AnalyticJacobian,converged,errf_k,errDeltax_k,relDeltax_k,iterations,X_an = newtonNd(
-            self.eval_f,
+            lambda x, p, u: c * self.eval_f(x, p, u),
             x0,
             p,
             self.u,
@@ -111,7 +113,7 @@ class RunPM4NonlinearSolve:
             self.MaxIter,
             self.visualize,
             FiniteDifference,
-            self.eval_Jf)
+            lambda eval_f, x, p, u: c * self.eval_Jf(eval_f, x, p, u))
         plt.title('Intermediate Newton Solutions with provided eval Jf function')
         plt.show()
         print(f"Errors after {iterations} iterations: errf_k={errf_k}, errDeltax_k={errDeltax_k}, relDeltax_k={relDeltax_k}")
@@ -147,8 +149,9 @@ class RunPM4NonlinearSolve:
         print(' ')
         print('Solving with provided eval_Jf Jacobian function')
         FiniteDifference=0;  
+        c = 3
         x_AnalyticJacobian,converged,errf_k,errDeltax_k,relDeltax_k,iterations,X_an = newtonNd(
-            self.eval_f,
+            lambda x, p, u: c * self.eval_f(x, p, u),
             x0,
             p,
             self.u,
@@ -158,7 +161,7 @@ class RunPM4NonlinearSolve:
             self.MaxIter,
             self.visualize,
             FiniteDifference,
-            self.eval_Jf)
+            lambda eval_f, x, p, u: c * self.eval_Jf(eval_f, x, p, u))
         plt.title('Intermediate Newton Solutions with provided eval Jf function')
         plt.show()
         print(f"Errors after {iterations} iterations: errf_k={errf_k}, errDeltax_k={errDeltax_k}, relDeltax_k={relDeltax_k}")
@@ -196,9 +199,10 @@ class RunPM4NonlinearSolve:
 
         print(' ')
         print('Solving with provided eval_Jf Jacobian function')
-        FiniteDifference=0;  
+        FiniteDifference=0; 
+        c = 3 
         x_AnalyticJacobian,converged,errf_k,errDeltax_k,relDeltax_k,iterations,X_an = newtonNd(
-            self.eval_f,
+            lambda x, p, u: c * self.eval_f(x, p, u),
             x0,
             p,
             self.u,
@@ -208,7 +212,55 @@ class RunPM4NonlinearSolve:
             self.MaxIter,
             self.visualize,
             FiniteDifference,
-            self.eval_Jf)
+            lambda eval_f, x, p, u: c * self.eval_Jf(eval_f, x, p, u))
+        plt.title('Intermediate Newton Solutions with provided eval Jf function')
+        plt.show()
+        print(f"Errors after {iterations} iterations: errf_k={errf_k}, errDeltax_k={errDeltax_k}, relDeltax_k={relDeltax_k}")
+        print(f"Converged solution x:\n{x_AnalyticJacobian}")
+        create_network_evolution_gif(X_an, p, save=False, show=True, fps=10)
+
+    def run_nonlinear_solve_3x3_C_and_T_growth(self):
+        print("Running nonlinear solve test for C and T growth model:")
+        p = copy.deepcopy(self.p_default)
+        p.k_T = 0.05
+        p.lambda_T = 5
+
+        # --- grid setup ---
+        rows, cols = 3, 3
+        p.rows = rows
+        p.cols = cols
+        n_cells = rows * cols
+
+        # Initial guess
+        # poor guess: C 5, T 2, A 1
+        # good guess: C 24, T 15, A 1
+        x0 = np.zeros((n_cells * 3, 1))
+        x0[0::3, 0] = 24.0  # Cancer cells
+        x0[1::3, 0] = 15.0  # T cells
+        x0[2::3, 0] = 1.0  # Drug
+
+        print(f"Initial guess x0:\n{x0.flatten()}")
+
+        # turn shape of x0 into a vector
+        x0 = x0.flatten()
+        print(f"The shape of x0 is {x0.shape}")
+
+        print(' ')
+        print('Solving with provided eval_Jf Jacobian function')
+        FiniteDifference=0;  
+        c = 3
+        x_AnalyticJacobian,converged,errf_k,errDeltax_k,relDeltax_k,iterations,X_an = newtonNd(
+            lambda x, p, u: c * self.eval_f(x, p, u),
+            x0,
+            p,
+            self.u,
+            self.errf,
+            self.errDeltax,
+            self.relDeltax,
+            self.MaxIter,
+            self.visualize,
+            FiniteDifference,
+            lambda eval_f, x, p, u: c * self.eval_Jf(eval_f, x, p, u))
         plt.title('Intermediate Newton Solutions with provided eval Jf function')
         plt.show()
         print(f"Errors after {iterations} iterations: errf_k={errf_k}, errDeltax_k={errDeltax_k}, relDeltax_k={relDeltax_k}")
@@ -231,8 +283,9 @@ class RunPM4NonlinearSolve:
         print(' ')
         print('Solving with provided eval_Jf Jacobian function')
         FiniteDifference=0;  
+        c = 3
         x_AnalyticJacobian,converged,errf_k,errDeltax_k,relDeltax_k,iterations,X_an = newtonNd(
-            self.eval_f,
+            lambda x, p, u: c * self.eval_f(x, p, u),
             x0,
             p,
             self.u,
@@ -242,15 +295,17 @@ class RunPM4NonlinearSolve:
             self.MaxIter,
             self.visualize,
             FiniteDifference,
-            self.eval_Jf)
+            lambda eval_f, x, p, u: c * self.eval_Jf(eval_f, x, p, u))
         plt.title('Intermediate Newton Solutions with provided eval Jf function')
         plt.show()
 
     def run_all(self):
-        #self.run_nonlinear_solve_logistic()
-        #self.run_nonlinear_solve_3x3_default()
-        #self.run_nonlinear_solve_T_cell_kill()
+        self.run_nonlinear_solve_logistic()
+        self.run_nonlinear_solve_3x3_default()
+        self.run_nonlinear_solve_T_cell_kill()
         self.run_nonlinear_solve_spatial_diffusion()
+        self.run_nonlinear_solve_3x3_C_and_T_growth()
+        # self.run_fake_spatial_data_tumor()
 
 if __name__ == "__main__":
     runner = RunPM4NonlinearSolve()
