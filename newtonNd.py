@@ -54,9 +54,9 @@ def newtonNd(fhand, x0, p, u,errf,errDeltax,relDeltax,MaxIter,visualize, FiniteD
             x_col = X[:,k].reshape(-1,1)
             Jf,_ = eval_Jf_FiniteDifference(fhand,x_col,p,u)
         else: 
-            print(f"[DEBUG] Computing Jacobian at iteration {k}")
+            #print(f"[DEBUG] Computing Jacobian at iteration {k}")
             Jf = Jfhand(fhand, X[:,k],p,u)
-        print(f"[DEBUG] Jacobian Jf at iteration {k}:\n{Jf}")
+        #print(f"[DEBUG] Jacobian Jf at iteration {k}:\n{Jf}")
 
         # create a heatmap of the Jacobian for visualization
         visualize_Jacobian = False
@@ -83,7 +83,7 @@ def newtonNd(fhand, x0, p, u,errf,errDeltax,relDeltax,MaxIter,visualize, FiniteD
 
         if sparse_solve_flag:
             Jf_sparse = csc_matrix(Jf)
-            print(f"Sparse matrix: {Jf_sparse}")
+            #print(f"Sparse matrix: {Jf_sparse}")
             Deltax = spsolve(Jf_sparse, -f)
         else:
             Deltax = np.linalg.solve(Jf, -f)       #NOTE this is the only difference from 1D to multiD
