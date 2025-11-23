@@ -44,8 +44,8 @@ def process_single_sample(file):
     slide_response_df = pd.read_csv(slide_response_path)
 
     p_default = Params(
-        lambda_C=0.33, K_C=28, d_C=0.01, k_T=4, K_K=5, D_C=0.01,
-        lambda_T=3.0, K_T=10, K_R=10, d_T=0.01, k_A=0.16, K_A=100, D_T=0.1,
+        lambda_C=0.33, K_C=30, d_C=0.01, k_T=4, K_K=5, D_C=0.2,
+        lambda_T=0.5, K_T=10, K_R=20, d_T=0.01, k_A=0.16, K_A=100, D_T=0.2,
         d_A=0.0315, rows=1, cols=1
     )
 
@@ -73,7 +73,7 @@ def process_single_sample(file):
 
     #visualizeNetwork(x=x_col, p=p_default, save=False, visualize=False)
 
-    NumIter = 100
+    NumIter = 8400
     w = 0.01
 
     X, t = SimpleSolver(
@@ -81,6 +81,9 @@ def process_single_sample(file):
         NumIter, w=w, visualize=False,
         gif_file_name=f"{output_figures_path}/{sample_id}_simplesolver.gif"
     )
+
+    # print the total number of frames generated
+    print(f"Sample {sample_id}: Generated {X.shape[1]} frames.")
 
     total_Cf, total_Tf = eval_f_output(X[:, -1].reshape(-1, 1))
 
@@ -133,4 +136,8 @@ if __name__ == "__main__":
 
     # Save summary results
     df = pd.DataFrame(results)
+    # calculate accuracy
+    df["correct"] = df["ground_truth"] == df["predicted"]
+    accuracy = df["correct"].mean()
+    print(f"Prediction accuracy: {accuracy * 100:.2f}%")
     df.to_csv("test_clinical_data_visualization/summary_results.csv", index=False)
