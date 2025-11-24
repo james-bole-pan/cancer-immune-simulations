@@ -43,9 +43,15 @@ def process_single_sample(file):
 
     slide_response_df = pd.read_csv(slide_response_path)
 
+    # p_default = Params(
+    #     lambda_C=0.33, K_C=30, d_C=0.01, k_T=4, K_K=5, D_C=0.2,
+    #     lambda_T=0.5, K_T=10, K_R=20, d_T=0.01, k_A=0.16, K_A=100, D_T=0.2,
+    #     d_A=0.0315, rows=1, cols=1
+    # )
+
     p_default = Params(
-        lambda_C=0.33, K_C=30, d_C=0.01, k_T=4, K_K=5, D_C=0.2,
-        lambda_T=0.5, K_T=10, K_R=20, d_T=0.01, k_A=0.16, K_A=100, D_T=0.2,
+        lambda_C=0.33, K_C=30, d_C=0.01, k_T=4, K_K=15, D_C=0.01,
+        lambda_T=0.5, K_T=10, K_R=20, d_T=0.01, k_A=0.16, K_A=100, D_T=0.01,
         d_A=0.0315, rows=1, cols=1
     )
 
@@ -124,20 +130,30 @@ def process_single_sample(file):
 # ------------------------------------------------------------
 # Parallel Driver
 # ------------------------------------------------------------
-
 if __name__ == "__main__":
-    clinical_data_path = "data/nature_immune_processed"
-    files = [f for f in os.listdir(clinical_data_path) if f.endswith(".npy")]
-    # pick the first 10 files for testing
-    files = files[:10]
+    CSV_PATH = "data_preprocessing_notebooks/npy_dimensions_sorted.csv" 
+    TOP_N = 10                           
+
+    df = pd.read_csv(CSV_PATH)
+    df_sorted = df.sort_values(by="first_two_product", ascending=True)
+    df_topN = df_sorted.head(TOP_N)
+    
+    files_to_run = df_topN["full_path"].tolist()
+
+    print(f"Running on top {TOP_N} smallest .npy files:")
+    for fp in files_to_run:
+        print(" -", fp)
 
     with Pool(cpu_count()) as pool:
-        results = pool.map(process_single_sample, files)
+        file_names_only = [os.path.basename(fp) for fp in files_to_run]
+        results = pool.map(process_single_sample, file_names_only)
 
-    # Save summary results
-    df = pd.DataFrame(results)
-    # calculate accuracy
-    df["correct"] = df["ground_truth"] == df["predicted"]
-    accuracy = df["correct"].mean()
+    df_results = pd.DataFrame(results)
+    
+    df_results["correct"] = df_results["ground_truth"] == df_results["predicted"]
+    accuracy = df_results["correct"].mean()
+    
     print(f"Prediction accuracy: {accuracy * 100:.2f}%")
-    df.to_csv("test_clinical_data_visualization/summary_results.csv", index=False)
+
+    os.makedirs("test_clinical_data_visualization", exist_ok=True)
+    df_results.to_csv("test_clinical_data_visualization/summary_results.csv", index=False)
