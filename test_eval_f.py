@@ -2,6 +2,8 @@ from eval_f import eval_f, Params
 from scipy.special import lambertw
 import numpy as np
 from SimpleSolver import SimpleSolver
+from eval_u_keytruda_input import eval_u_keytruda_input
+import matplotlib.pyplot as plt
 import os
 import copy
 
@@ -400,6 +402,43 @@ class TestEvalF:
 
         print(f"TEST PASSED ✅: Drug pulse PK trajectory rel error = {rel_err:.2e}") 
 
+    def test_drug_pulses_u_func(self, w, num_iter):
+        p = copy.deepcopy(self.p_default)
+        p.lambda_C = 0; p.d_C = 0; p.k_T = 0; p.D_C = 0
+        p.lambda_T = 0; p.d_T = 0; p.k_A = 0; p.D_T = 0
+
+        rows, cols = 3, 3
+        p.rows = rows
+        p.cols = cols
+        n_cells = rows * cols
+
+        x0 = np.zeros((n_cells * 3, 1))
+
+        interval = 21.0
+        dose = 200.0
+
+        bolus = eval_u_keytruda_input(w=w, dose=dose, interval=interval)
+
+        X, t = SimpleSolver(
+            eval_f,
+            x_start=x0,
+            p=p,
+            eval_u=bolus,
+            NumIter=num_iter,
+            w=w,
+            visualize=False,
+            gif_file_name=f"{self.figure_dir}/drug_pulses_u_func_w_{w}.gif",
+        )
+
+        # create a plot of the concentration of drug A over time at one grid
+        drug_A_concentration = X[2, :]
+        plt.plot(np.arange(len(drug_A_concentration)), drug_A_concentration)
+        plt.xlabel("Time Step")
+        plt.ylabel("Drug A Concentration")
+        plt.title(f"Drug A Concentration Over Time")
+        plt.savefig(f"{self.figure_dir}/drug_pulses_u_func_w_{w}.png")
+        plt.close()
+
     def test_zero_initial_conditions(self, w, num_iter):
         p = copy.deepcopy(self.p_default)
         p.rows, p.cols = 3, 3
@@ -485,6 +524,7 @@ class TestEvalF:
         self.test_lambda_T_recruitment(w, num_iter)
         self.test_k_A_drug_boost(w, num_iter)
         self.test_drug_pulses_pk(w, num_iter)
+        # self.test_drug_pulses_u_func(w=0.01, num_iter=8400)
         self.test_zero_initial_conditions(w, num_iter)
         self.test_sim_one_grid(w, num_iter)
 

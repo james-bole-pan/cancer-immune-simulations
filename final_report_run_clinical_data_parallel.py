@@ -2,6 +2,7 @@ import os
 import numpy as np
 import pandas as pd
 from multiprocessing import Pool, cpu_count
+import matplotlib.pyplot as plt
 
 from eval_f import eval_f, Params
 from eval_f_output import eval_f_output
@@ -14,7 +15,7 @@ from SimpleSolver import SimpleSolver
 # Helper functions
 # ------------------------------------------------------------
 
-def sample_trajectory_for_gif(X, max_frames=20):
+def sample_trajectory_for_gif(X, max_frames):
     X = np.asarray(X)
     N, T = X.shape
 
@@ -50,12 +51,10 @@ def process_single_sample(file):
     # )
 
     p_default = Params(
-        lambda_C=0.33, K_C=30, d_C=0.01, k_T=4, K_K=15, D_C=0.01,
-        lambda_T=0.5, K_T=10, K_R=20, d_T=0.01, k_A=0.16, K_A=100, D_T=0.01,
+        lambda_C=0.33, K_C=28, d_C=0.01, k_T=4, K_K=5, D_C=0.01,
+        lambda_T=1, K_T=10, K_R=20, d_T=0.01, k_A=0.16, K_A=100, D_T=0.2,
         d_A=0.0315, rows=1, cols=1
     )
-
-    u_fun = eval_u_keytruda_input()
 
     file_path = os.path.join(clinical_data_path, file)
     sample_id = file.replace(".npy", "")
@@ -82,11 +81,27 @@ def process_single_sample(file):
     NumIter = 8400
     w = 0.01
 
+    u_fun = eval_u_keytruda_input(w=w)
+
     X, t = SimpleSolver(
         eval_f, x_col, p_default, u_fun,
         NumIter, w=w, visualize=False,
         gif_file_name=f"{output_figures_path}/{sample_id}_simplesolver.gif"
     )
+
+    # create a plot of the concentration of drug A over time at one grid
+    drug_A_concentration = X[2, :]
+    plt.plot(np.arange(len(drug_A_concentration)), drug_A_concentration)
+    plt.xlabel("Time Step")
+    plt.ylabel("Drug A Concentration")
+    plt.title(f"Drug A Concentration Over Time for {sample_id}")
+    plt.savefig(f"{output_figures_path}/{sample_id}_drug_A_concentration.png")
+    plt.close()
+
+    if not np.isfinite(X).all():
+        print(f"❌ WARNING: Simulation for {sample_id} produced NaN or Inf values!")
+    else:
+        print(f"✅ Numerical check passed for {sample_id}: all values finite.")
 
     # print the total number of frames generated
     print(f"Sample {sample_id}: Generated {X.shape[1]} frames.")
@@ -101,7 +116,7 @@ def process_single_sample(file):
     )
     #np.save(npy_save_path, X)
 
-    X_sampled = sample_trajectory_for_gif(X, max_frames=20)
+    X_sampled = sample_trajectory_for_gif(X, max_frames=100)
 
     create_network_evolution_gif(
         X_sampled,
@@ -110,7 +125,7 @@ def process_single_sample(file):
         show=False,
         output_dir=output_figures_path,
         title_prefix=f"{sample_id}_evolution",
-        fps=5
+        fps=20
     )
 
     return {
@@ -132,7 +147,7 @@ def process_single_sample(file):
 # ------------------------------------------------------------
 if __name__ == "__main__":
     CSV_PATH = "data_preprocessing_notebooks/npy_dimensions_sorted.csv" 
-    TOP_N = 10                           
+    TOP_N = 1                   
 
     df = pd.read_csv(CSV_PATH)
     df_sorted = df.sort_values(by="first_two_product", ascending=True)
