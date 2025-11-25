@@ -51,8 +51,8 @@ def process_single_sample(file):
     # )
 
     p_default = Params(
-        lambda_C=0.33, K_C=28, d_C=0.01, k_T=4, K_K=5, D_C=0.01,
-        lambda_T=1, K_T=10, K_R=20, d_T=0.01, k_A=0.16, K_A=100, D_T=0.2,
+        lambda_C=0.33, K_C=28, d_C=0.01, k_T=4, K_K=15, D_C=0.0001,
+        lambda_T=0.7, K_T=10, K_R=10, d_T=0.1, k_A=0.16, K_A=100, D_T=0.2,
         d_A=0.0315, rows=1, cols=1
     )
 
@@ -96,6 +96,33 @@ def process_single_sample(file):
     plt.ylabel("Drug A Concentration")
     plt.title(f"Drug A Concentration Over Time for {sample_id}")
     plt.savefig(f"{output_figures_path}/{sample_id}_drug_A_concentration.png")
+    plt.close()
+
+    # create a plot of total cancer cells over time 
+    cancer_cells = X[0::3, :]      # shape = (num_cells, num_timepoints)
+    total_cancer = np.sum(cancer_cells, axis=0)
+
+    plt.figure(figsize=(6,4))
+    plt.plot(np.arange(len(total_cancer)), total_cancer, linewidth=2)
+    plt.xlabel("Time Step")
+    plt.ylabel("Total Cancer Cell Density")
+    plt.title(f"Total Cancer Cells Over Time for {sample_id}")
+    plt.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(f"{output_figures_path}/{sample_id}_cancer_cells_over_time.png")
+    plt.close()
+
+    # create a plot of total T cells over time
+    t_cells = X[1::3, :]      # shape = (num_cells, num_timepoints)
+    total_tcells = np.sum(t_cells, axis=0)
+    plt.figure(figsize=(6,4))
+    plt.plot(np.arange(len(total_tcells)), total_tcells, color='orange', linewidth=2)
+    plt.xlabel("Time Step")
+    plt.ylabel("Total T Cell Density")
+    plt.title(f"Total T Cells Over Time for {sample_id}")
+    plt.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(f"{output_figures_path}/{sample_id}_t_cells_over_time.png")
     plt.close()
 
     if not np.isfinite(X).all():
@@ -147,7 +174,7 @@ def process_single_sample(file):
 # ------------------------------------------------------------
 if __name__ == "__main__":
     CSV_PATH = "data_preprocessing_notebooks/npy_dimensions_sorted.csv" 
-    TOP_N = 1                   
+    TOP_N = 2                
 
     df = pd.read_csv(CSV_PATH)
     df_sorted = df.sort_values(by="first_two_product", ascending=True)
