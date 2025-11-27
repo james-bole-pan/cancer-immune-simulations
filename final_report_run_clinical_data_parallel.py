@@ -51,8 +51,8 @@ def process_single_sample(file):
     # )
 
     p_default = Params(
-        lambda_C=0.33, K_C=28, d_C=0.01, k_T=4, K_K=15, D_C=0.0001,
-        lambda_T=0.7, K_T=10, K_R=10, d_T=0.1, k_A=0.16, K_A=100, D_T=0.2,
+        lambda_C=0.7, K_C=28, d_C=0.01, k_T=4, K_K=25, D_C=0.0005,
+        lambda_T=0.2, K_T=10, K_R=10, d_T=0.01, k_A=0.16, K_A=100, D_T=0.1,
         d_A=0.0315, rows=1, cols=1
     )
 
@@ -174,7 +174,7 @@ def process_single_sample(file):
 # ------------------------------------------------------------
 if __name__ == "__main__":
     CSV_PATH = "data_preprocessing_notebooks/npy_dimensions_sorted.csv" 
-    TOP_N = 2                
+    TOP_N = 46                
 
     df = pd.read_csv(CSV_PATH)
     df_sorted = df.sort_values(by="first_two_product", ascending=True)
