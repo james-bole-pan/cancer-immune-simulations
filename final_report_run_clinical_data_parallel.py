@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 from multiprocessing import Pool, cpu_count
 import matplotlib.pyplot as plt
+import time
 
 from eval_f import eval_f, Params
 from eval_f_output import eval_f_output
@@ -38,21 +39,19 @@ def pct_change(final, initial):
 # ------------------------------------------------------------
 
 def process_single_sample(file):
+    start_time = time.time()  # ← start timer
+
     clinical_data_path = "data/nature_immune_processed"
     output_figures_path = "test_clinical_data_visualization"
     slide_response_path = "data/nature_immune_processed/slide_responses.csv"
 
-    slide_response_df = pd.read_csv(slide_response_path)
+    os.makedirs(output_figures_path, exist_ok=True)
 
-    # p_default = Params(
-    #     lambda_C=0.33, K_C=30, d_C=0.01, k_T=4, K_K=5, D_C=0.2,
-    #     lambda_T=0.5, K_T=10, K_R=20, d_T=0.01, k_A=0.16, K_A=100, D_T=0.2,
-    #     d_A=0.0315, rows=1, cols=1
-    # )
+    slide_response_df = pd.read_csv(slide_response_path)
 
     p_default = Params(
         lambda_C=0.7, K_C=28, d_C=0.01, k_T=4, K_K=25, D_C=0.0005,
-        lambda_T=0.2, K_T=10, K_R=10, d_T=0.01, k_A=0.16, K_A=100, D_T=0.1,
+        lambda_T=0.05, K_T=10, K_R=10, d_T=0.01, k_A=0.16, K_A=100, D_T=0.1,
         d_A=0.0315, rows=1, cols=1
     )
 
@@ -76,8 +75,6 @@ def process_single_sample(file):
 
     total_C0, total_T0 = eval_f_output(x_col)
 
-    #visualizeNetwork(x=x_col, p=p_default, save=False, visualize=False)
-
     NumIter = 8400
     w = 0.01
 
@@ -89,7 +86,7 @@ def process_single_sample(file):
         gif_file_name=f"{output_figures_path}/{sample_id}_simplesolver.gif"
     )
 
-    # create a plot of the concentration of drug A over time at one grid
+    # --- plotting code unchanged ---
     drug_A_concentration = X[2, :]
     plt.plot(np.arange(len(drug_A_concentration)), drug_A_concentration)
     plt.xlabel("Time Step")
@@ -98,8 +95,7 @@ def process_single_sample(file):
     plt.savefig(f"{output_figures_path}/{sample_id}_drug_A_concentration.png")
     plt.close()
 
-    # create a plot of total cancer cells over time 
-    cancer_cells = X[0::3, :]      # shape = (num_cells, num_timepoints)
+    cancer_cells = X[0::3, :]
     total_cancer = np.sum(cancer_cells, axis=0)
 
     plt.figure(figsize=(6,4))
@@ -112,11 +108,10 @@ def process_single_sample(file):
     plt.savefig(f"{output_figures_path}/{sample_id}_cancer_cells_over_time.png")
     plt.close()
 
-    # create a plot of total T cells over time
-    t_cells = X[1::3, :]      # shape = (num_cells, num_timepoints)
+    t_cells = X[1::3, :]
     total_tcells = np.sum(t_cells, axis=0)
     plt.figure(figsize=(6,4))
-    plt.plot(np.arange(len(total_tcells)), total_tcells, color='orange', linewidth=2)
+    plt.plot(np.arange(len(total_tcells)), total_tcells, linewidth=2)
     plt.xlabel("Time Step")
     plt.ylabel("Total T Cell Density")
     plt.title(f"Total T Cells Over Time for {sample_id}")
@@ -130,7 +125,6 @@ def process_single_sample(file):
     else:
         print(f"✅ Numerical check passed for {sample_id}: all values finite.")
 
-    # print the total number of frames generated
     print(f"Sample {sample_id}: Generated {X.shape[1]} frames.")
 
     total_Cf, total_Tf = eval_f_output(X[:, -1].reshape(-1, 1))
@@ -141,7 +135,7 @@ def process_single_sample(file):
         output_figures_path,
         f"{sample_id}_X_NumIter{NumIter}_w{w}.npy"
     )
-    #np.save(npy_save_path, X)
+    # np.save(npy_save_path, X)
 
     X_sampled = sample_trajectory_for_gif(X, max_frames=100)
 
@@ -155,6 +149,9 @@ def process_single_sample(file):
         fps=20
     )
 
+    end_time = time.time()  # ← end timer
+    runtime_sec = end_time - start_time
+
     return {
         "sample_id": sample_id,
         "ground_truth": response_value,
@@ -166,6 +163,7 @@ def process_single_sample(file):
         "pct_change_cancer": float(pct_change(total_Cf, total_C0)),
         "pct_change_tcells": float(pct_change(total_Tf, total_T0)),
         "trajectory_path": npy_save_path,
+        "runtime_sec": runtime_sec,  # ← new column
     }
 
 
@@ -174,7 +172,7 @@ def process_single_sample(file):
 # ------------------------------------------------------------
 if __name__ == "__main__":
     CSV_PATH = "data_preprocessing_notebooks/npy_dimensions_sorted.csv" 
-    TOP_N = 46                
+    TOP_N = 20              
 
     df = pd.read_csv(CSV_PATH)
     df_sorted = df.sort_values(by="first_two_product", ascending=True)
