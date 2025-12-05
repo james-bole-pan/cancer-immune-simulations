@@ -598,7 +598,7 @@ if __name__ == "__main__":
     # tester.run_all_tests(w=1, num_iter=84, visualize=True)
 
     # Option 2: default visualize ON for everything
-    tester = TestEvalF(visualize_default=True)
+    tester = TestEvalF(visualize_default=False)
 
     # Run a single suite
     tester.run_all_tests(w=1, num_iter=84)
