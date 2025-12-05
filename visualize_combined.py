@@ -2,6 +2,58 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 
+def EulerVis(t_simple, X_simple, grid_size=(3,3), cell_index=1, save_path=None):
+    """
+    Visualize the time dynamics from the SimpleSolver for a specified grid cell,
+    and optionally save the figure to file.
+
+    Parameters
+    ----------
+    t_simple : array
+        Time vector from SimpleSolver.
+    X_simple : 2D array
+        States from SimpleSolver (num_states x time_steps).
+    grid_size : tuple, optional
+        Spatial grid size (rows, cols). Default (3,3).
+    cell_index : int, optional
+        Index (1-based) of which grid cell to visualize.
+    save_path : str, optional
+        Full file path to save the figure (e.g. "results/Grid1_dynamics.png").
+    """
+
+    num_cells = grid_size[0] * grid_size[1]
+    num_states_total = X_simple.shape[0]
+    num_states_per_cell = num_states_total // num_cells
+
+    if cell_index < 1 or cell_index > num_cells:
+        raise ValueError(f"cell_index must be between 1 and {num_cells}")
+
+    # Indices for selected cell
+    idx_start = (cell_index - 1) * num_states_per_cell
+    idx = np.arange(idx_start, idx_start + num_states_per_cell)
+    labels = ["Cancer cells", "Immune cells", "Drug conc"]
+
+    # --- Create figure ---
+    fig, ax = plt.subplots(figsize=(10, 6))
+    for i in range(num_states_per_cell):
+        ax.plot(t_simple, X_simple[idx[i], :], linewidth=2, label=labels[i])
+    ax.set_title(f"Grid Cell {cell_index} Time Dynamics", fontsize=15)
+    ax.set_xlabel("Time", fontsize=13)
+    ax.set_ylabel("State Value", fontsize=13)
+    ax.grid(True, linestyle='--', alpha=0.7)
+    ax.legend(fontsize=11)
+
+    plt.tight_layout()
+
+    # --- Save figure if requested ---
+    if save_path is not None:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        fig.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"Figure saved to: {save_path}")
+
+    plt.show()
+    
+
 def DoubleVis(
     t_simple, X_simple,
     t_newton, X_newton,

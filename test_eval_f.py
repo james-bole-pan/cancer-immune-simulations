@@ -3,6 +3,7 @@ from scipy.special import lambertw
 import numpy as np
 from SimpleSolver import SimpleSolver
 from eval_u_keytruda_input import eval_u_keytruda_input
+from save_params_npz import save_params_npz 
 import matplotlib.pyplot as plt
 import os
 import copy
@@ -37,6 +38,9 @@ class TestEvalF:
         p.rows = rows
         p.cols = cols
         n_cells = rows * cols
+
+        # Save scenario parameters to npz file for future use
+        save_params_npz("scenarios/logistic_growth.npz", p)
 
         # Initial condition: each cell starts with C0 tumor cells
         C0 = 0.1
@@ -81,6 +85,9 @@ class TestEvalF:
         p.rows = rows
         p.cols = cols
         n_cells = rows * cols
+
+        # Save scenario parameters to npz file for future use
+        save_params_npz("scenarios/pure_decay.npz", p)
 
         C0 = 25.0
         T0 = 25.0
@@ -144,6 +151,9 @@ class TestEvalF:
         p.cols = cols
         n_cells = rows * cols
 
+        # Save scenario parameters to npz file for future use
+        save_params_npz("scenarios/spatial_diffusion.npz", p)
+
         # Initial condition: put tumor cells (C) and T cells (T) only in the center cell
         C0, T0 = 10.0, 5.0
         x0 = np.zeros((n_cells * 3, 1))
@@ -203,6 +213,9 @@ class TestEvalF:
         p.cols = cols
         n_cells = rows * cols
 
+        # Save scenario parameters to npz file for future use
+        save_params_npz("scenarios/kt_killing_grid.npz", p)
+
         C0 = 1000.0
         T_const = 1.0
 
@@ -257,6 +270,9 @@ class TestEvalF:
         p.cols = cols
         n_cells = rows * cols
 
+        # Save scenario parameters to npz file for future use
+        save_params_npz("scenarios/lambda_T_recruitment.npz", p)
+
         # --- initial conditions ---
         C0 = 6.0
         T0 = 0.0
@@ -307,6 +323,9 @@ class TestEvalF:
         p.cols = cols
         n_cells = rows * cols
 
+        # Save scenario parameters to npz file for future use
+        save_params_npz("scenarios/k_A_drug_boost.npz", p)
+
         C0 = 0.0
         T0 = 1.0
         A0 = 10.0   # drug present in every grid
@@ -355,6 +374,9 @@ class TestEvalF:
         p.rows = rows
         p.cols = cols
         n_cells = rows * cols
+
+        # Save scenario parameters to npz file for future use
+        save_params_npz("scenarios/drug_pulses_pk.npz", p)
 
         x0 = np.zeros((n_cells * 3, 1))
 
@@ -412,6 +434,9 @@ class TestEvalF:
         p.cols = cols
         n_cells = rows * cols
 
+        # Save scenario parameters to npz file for future use
+        save_params_npz("scenarios/drug_pulses_u_func.npz", p)
+
         x0 = np.zeros((n_cells * 3, 1))
 
         interval = 21.0
@@ -444,6 +469,9 @@ class TestEvalF:
         p.rows, p.cols = 3, 3
         x0 = np.zeros((p.rows * p.cols * 3, 1))  # Everything starts at 0
 
+        # Save scenario parameters to npz file for future use
+        save_params_npz("scenarios/zero_initial_conditions.npz", p)
+
         u_func = self.constant_input(0.0)
 
         X, t = SimpleSolver(
@@ -469,6 +497,9 @@ class TestEvalF:
         p.rows = rows
         p.cols = cols
         n_cells = rows * cols
+
+        # Save scenario parameters to npz file for future use
+        save_params_npz("scenarios/sim_one_grid.npz", p)
 
         # Initial conditions (all terms are non-zero)
         C0 = 4
@@ -524,7 +555,7 @@ class TestEvalF:
         self.test_lambda_T_recruitment(w, num_iter)
         self.test_k_A_drug_boost(w, num_iter)
         self.test_drug_pulses_pk(w, num_iter)
-        # self.test_drug_pulses_u_func(w=0.01, num_iter=8400)
+        self.test_drug_pulses_u_func(w=0.01, num_iter=8400)
         self.test_zero_initial_conditions(w, num_iter)
         self.test_sim_one_grid(w, num_iter)
 
