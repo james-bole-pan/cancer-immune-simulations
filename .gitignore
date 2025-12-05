@@ -2,3 +2,4 @@ __pycache__/
 data/
 test_clinical_data_visualization/
 test_clinical_data_visualization_20251126
+test_evalf_output_figures_autograd
