@@ -1,3 +1,12 @@
+"""
+Goal (explicit, enforced in the loss):
+1) NO-DRUG condition (input always 0):
+      -> ALL samples should be predicted NR (y=0).
+2) WITH-DRUG condition (Keytruda dosing):
+      -> R should be predicted R, NR should be predicted NR
+         using the true labels from slide_responses.csv.
+"""
+
 import os
 import copy
 import numpy as np
@@ -9,20 +18,22 @@ import torch.nn.functional as F
 
 from eval_u_keytruda_input import eval_u_keytruda_input
 
-# ==== MOD ==== reproducibility + some global clamps
+# ============================================================
+# 0) Reproducibility + clamps
+# ============================================================
+
 torch.set_default_dtype(torch.float32)
 TORCH_SEED = 123
 np.random.seed(42)
 torch.manual_seed(TORCH_SEED)
 
 CLAMP_MIN_STATE = 0.0
-CLAMP_MAX_STATE = 1e6       # clamp state to avoid blow-up
-CLAMP_PCT_MIN = -1000.0     # clamp pct_change to avoid huge logits
+CLAMP_MAX_STATE = 1e6
+CLAMP_PCT_MIN = -1000.0
 CLAMP_PCT_MAX = 1000.0
 
-
 # ============================================================
-# 0) Device helper
+# 1) Device helper
 # ============================================================
 
 def get_device():
@@ -32,16 +43,14 @@ def get_device():
         return torch.device("cuda")
     return torch.device("cpu")
 
-
 # ============================================================
-# 1) Params
+# 2) Params
 # ============================================================
 
 class Params:
     """
-    Keep the same field names as your original Params.
-    We'll treat p_default as the source of FIXED parameters.
-    Optimized parameters are provided separately by theta_pos.
+    p_default carries baseline values for non-optimized params.
+    Optimized params are provided by theta_pos in OPT_NAMES order.
     """
     def __init__(self, lambda_C, K_C, d_C, k_T, K_K, D_C,
                        lambda_T, K_T, K_R, d_T, k_A, K_A, D_T,
@@ -70,13 +79,12 @@ class Params:
 
 
 # ============================================================
-# 2) Optimized subset
+# 3) Optimized subset
 # ============================================================
 
 # Optimize all model parameters except K_C, K_A, and d_A.
-# Keep ordering consistent for packing/unpacking.
 OPT_NAMES = [
-    "lambda_C", "d_C", "k_T", "K_K", "D_C",
+    "lambda_C", "K_C", "d_C", "k_T", "K_K", "D_C",
     "lambda_T", "K_T", "K_R", "d_T", "k_A", "D_T",
 ]
 
@@ -84,17 +92,9 @@ def softplus_torch(x):
     return F.softplus(x)
 
 def inv_softplus_torch(y, eps=1e-8):
-    """
-    Numerically safe inverse softplus:
-      softplus(x) = log(1 + exp(x))
-      => x = log(exp(y) - 1)
-    """
     return torch.log(torch.exp(y) - 1.0 + eps)
 
 def pack_from_default_torch(p_default, device):
-    """
-    Initialize theta_raw so softplus(theta_raw) ~ default values.
-    """
     vals = torch.tensor([getattr(p_default, k) for k in OPT_NAMES],
                         dtype=torch.float32, device=device)
     theta_raw = inv_softplus_torch(vals)
@@ -102,23 +102,17 @@ def pack_from_default_torch(p_default, device):
     return theta_raw
 
 def theta_raw_to_positive(theta_raw):
-    # ==== MOD ==== also clamp to avoid insane parameter values
     theta_pos = softplus_torch(theta_raw)
+    # keep parameters in a sane range
     theta_pos = torch.clamp(theta_pos, 1e-6, 1e3)
     return theta_pos
 
 
 # ============================================================
-# 3) Autograd-safe 4-neighbor Laplacian (vectorized)
+# 4) Autograd-safe 4-neighbor Laplacian (vectorized)
 # ============================================================
 
 def laplacian4_vec(X):
-    """
-    X: (rows, cols) tensor
-    Returns 4-neighbor unnormalized Laplacian:
-        sum(neighbors) - n_nb * center
-    with correct edge handling.
-    """
     rows, cols = X.shape
     device = X.device
     dtype = X.dtype
@@ -126,21 +120,17 @@ def laplacian4_vec(X):
     sum_nb = torch.zeros((rows, cols), device=device, dtype=dtype)
     nnb = torch.zeros((rows, cols), device=device, dtype=dtype)
 
-    # up neighbor contributes to cell below
     if rows > 1:
         sum_nb[1:, :] = sum_nb[1:, :] + X[:-1, :]
         nnb[1:, :] = nnb[1:, :] + 1.0
 
-        # down neighbor contributes to cell above
         sum_nb[:-1, :] = sum_nb[:-1, :] + X[1:, :]
         nnb[:-1, :] = nnb[:-1, :] + 1.0
 
     if cols > 1:
-        # left neighbor contributes to cell right
         sum_nb[:, 1:] = sum_nb[:, 1:] + X[:, :-1]
         nnb[:, 1:] = nnb[:, 1:] + 1.0
 
-        # right neighbor contributes to cell left
         sum_nb[:, :-1] = sum_nb[:, :-1] + X[:, 1:]
         nnb[:, :-1] = nnb[:, :-1] + 1.0
 
@@ -148,41 +138,33 @@ def laplacian4_vec(X):
 
 
 # ============================================================
-# 4) eval_f_torch with consistent signature
+# 5) eval_f_torch
 # ============================================================
 
 def eval_f_torch(x_col, theta_pos, p_fixed, r_A):
-    """
-    x_col: (N,1) tensor with layout [C,T,A] repeating
-    theta_pos: (len(OPT_NAMES),) tensor mapped via softplus
-    p_fixed: Params (fixed baseline values)
-    r_A: scalar tensor
-    """
     rows = p_fixed.rows
     cols = p_fixed.cols
 
-    # Fixed params (only the non-learned ones actually stay fixed):
-    K_C = p_fixed.K_C
+    # fixed (not optimized)
     K_A = p_fixed.K_A
     d_A = p_fixed.d_A
 
-    # Learned subset (theta_pos ordering follows OPT_NAMES)
+    # learned (OPT_NAMES order)
     lambda_C = theta_pos[0]
-    d_C      = theta_pos[1]
-    k_T      = theta_pos[2]
-    K_K      = theta_pos[3]
-    D_C      = theta_pos[4]
-
-    lambda_T = theta_pos[5]
-    K_T      = theta_pos[6]
-    K_R      = theta_pos[7]
-    d_T      = theta_pos[8]
-    k_A      = theta_pos[9]
-    D_T      = theta_pos[10]
+    K_C      = theta_pos[1]
+    d_C      = theta_pos[2]
+    k_T      = theta_pos[3]
+    K_K      = theta_pos[4]
+    D_C      = theta_pos[5]
+    lambda_T = theta_pos[6]
+    K_T      = theta_pos[7]
+    K_R      = theta_pos[8]
+    d_T      = theta_pos[9]
+    k_A      = theta_pos[10]
+    D_T      = theta_pos[11]
 
     eps = 1e-12
 
-    # reshape to grid
     x_flat = x_col.view(-1)
     N = x_flat.numel()
     assert N == rows * cols * 3, f"State length {N} != rows*cols*3 ({rows*cols*3})"
@@ -192,16 +174,13 @@ def eval_f_torch(x_col, theta_pos, p_fixed, r_A):
     T = x_grid[:, :, 1]
     A = x_grid[:, :, 2]
 
-    # ==== MOD ==== ensure non-negative states before computing dynamics
     C = torch.clamp(C, CLAMP_MIN_STATE, CLAMP_MAX_STATE)
     T = torch.clamp(T, CLAMP_MIN_STATE, CLAMP_MAX_STATE)
     A = torch.clamp(A, CLAMP_MIN_STATE, CLAMP_MAX_STATE)
 
-    # diffusion
     lapC = laplacian4_vec(C)
     lapT = laplacian4_vec(T)
 
-    # tumor dynamics
     dCdt = (
         lambda_C * C * (1.0 - C / (K_C + eps))
         - d_C * C
@@ -209,7 +188,6 @@ def eval_f_torch(x_col, theta_pos, p_fixed, r_A):
         + D_C * lapC
     )
 
-    # T cell dynamics
     drug_boost = (k_A * A) / (A + K_A + eps)
     dTdt = (
         lambda_T * (C / (C + K_R + eps)) * (1.0 - T / (K_T + eps))
@@ -218,16 +196,15 @@ def eval_f_torch(x_col, theta_pos, p_fixed, r_A):
         + D_T * lapT
     )
 
-    # drug PK per cell
     dAdt = r_A - d_A * A
 
-    f_grid = torch.stack([dCdt, dTdt, dAdt], dim=2)  # (rows, cols, 3)
-    f_flat = f_grid.reshape(-1, 1)                   # (N,1)
+    f_grid = torch.stack([dCdt, dTdt, dAdt], dim=2)
+    f_flat = f_grid.reshape(-1, 1)
     return f_flat
 
 
 # ============================================================
-# 5) SimpleSolver_torch (no in-place history writes)
+# 6) SimpleSolver_torch
 # ============================================================
 
 def SimpleSolver_torch(
@@ -240,31 +217,22 @@ def SimpleSolver_torch(
     w,
     device
 ):
-    """
-    Forward Euler integrator.
-    Returns:
-      X: (N, NumIter+1) tensor
-      t: (NumIter+1,) tensor
-    """
     NumIter = int(NumIter)
 
-    # x0: ensure tensor on device
     x0 = torch.as_tensor(x_start, dtype=torch.float32, device=device)
     if x0.ndim == 1:
         x0 = x0.view(-1, 1)
 
-    # ==== MOD ==== clamp initial state and clean NaNs
     x0 = torch.nan_to_num(x0, nan=0.0, posinf=CLAMP_MAX_STATE, neginf=CLAMP_MIN_STATE)
     x0 = torch.clamp(x0, CLAMP_MIN_STATE, CLAMP_MAX_STATE)
 
     X_list = [x0]
     t_list = [torch.tensor(0.0, dtype=torch.float32, device=device)]
 
-    for k in range(NumIter):
+    for _ in range(NumIter):
         x_curr = X_list[-1]
         t_curr = t_list[-1]
 
-        # python float time for stateful dosing logic
         t_float = float(t_curr.item())
         u_val = eval_u(t_float)
 
@@ -273,34 +241,24 @@ def SimpleSolver_torch(
         f_val = eval_f(x_curr, theta_pos, p_fixed, r_A)
         x_next = x_curr + w * f_val
 
-        # ==== MOD ==== clamp and clean each step to avoid NaN/inf blow-up
         x_next = torch.nan_to_num(
-            x_next,
-            nan=0.0,
-            posinf=CLAMP_MAX_STATE,
-            neginf=CLAMP_MIN_STATE
+            x_next, nan=0.0, posinf=CLAMP_MAX_STATE, neginf=CLAMP_MIN_STATE
         )
         x_next = torch.clamp(x_next, CLAMP_MIN_STATE, CLAMP_MAX_STATE)
 
         X_list.append(x_next)
         t_list.append(t_curr + w)
 
-    # Stack into (N, T)
     X = torch.stack([xi.squeeze(1) for xi in X_list], dim=1)
     t = torch.stack(t_list)
-
     return X, t
 
 
 # ============================================================
-# 6) Cancer summary helpers
+# 7) Cancer summary helpers
 # ============================================================
 
 def total_cancer_from_xcol_torch(x_col):
-    """
-    x_col: (N,1) or (N,) or X[:, t] extraction
-    Layout: [C,T,A] repeating
-    """
     if x_col.ndim == 2:
         C_vals = x_col[0::3, 0]
     else:
@@ -312,76 +270,58 @@ def pct_change_torch(final, initial, eps=1e-12):
 
 
 # ============================================================
-# 7) Simulate → pct change → logit
+# 8) Simulation with injectable eval_u
 # ============================================================
 
-def simulate_pct_change_cancer_torch(
+def simulate_pct_change_cancer_torch_custom_u(
     x_col_np,
     p_default,
     theta_raw,
     rows,
     cols,
+    eval_u_func,
     NumIter=8400,
     w=0.01,
-    dose=200.0,
-    interval=21.0,
     temp=10.0,
     device=None,
 ):
     if device is None:
         device = get_device()
 
-    # x_col tensor
     x_col = torch.from_numpy(x_col_np).to(device=device, dtype=torch.float32)
     if x_col.ndim == 1:
         x_col = x_col.view(-1, 1)
 
-    # baseline cancer
     C0 = total_cancer_from_xcol_torch(x_col)
-
-    # ==== MOD ==== handle non-finite C0
     if not torch.isfinite(C0):
         C0 = torch.nan_to_num(C0, nan=0.0, posinf=CLAMP_MAX_STATE, neginf=CLAMP_MIN_STATE)
 
-    # positive theta
     theta_pos = theta_raw_to_positive(theta_raw)
 
-    # fixed params for this sample
     p_fixed = copy.deepcopy(p_default)
     p_fixed.rows = rows
     p_fixed.cols = cols
 
-    # fresh stateful dosing func per simulation
-    u_func = eval_u_keytruda_input(w=w, dose=dose, interval=interval)
-
-    # forward solve
-    X, t_vec = SimpleSolver_torch(
+    X, _ = SimpleSolver_torch(
         eval_f_torch,
         x_start=x_col,
         theta_pos=theta_pos,
         p_fixed=p_fixed,
-        eval_u=u_func,
+        eval_u=eval_u_func,
         NumIter=NumIter,
         w=w,
         device=device
     )
 
-    # final cancer
     x_final = X[:, -1]
     Cf = total_cancer_from_xcol_torch(x_final)
-
-    # ==== MOD ==== handle non-finite Cf
     if not torch.isfinite(Cf):
         Cf = torch.nan_to_num(Cf, nan=C0, posinf=CLAMP_MAX_STATE, neginf=CLAMP_MIN_STATE)
 
     pct = pct_change_torch(Cf, C0)
-    # ==== MOD ==== clamp pct to avoid huge logits / overflow
     pct = torch.clamp(pct, CLAMP_PCT_MIN, CLAMP_PCT_MAX)
 
-    # more negative pct -> higher responder prob
     logit = - pct / temp
-
-    # ==== MOD ==== clean logit
     logit = torch.nan_to_num(
         logit,
         nan=0.0,
@@ -392,14 +332,18 @@ def simulate_pct_change_cancer_torch(
     return pct, logit
 
 
+def make_eval_u_zero():
+    # deterministic no-drug input
+    return lambda t: 0.0
+
+
 # ============================================================
-# 8) Dataset utilities
+# 9) Dataset utilities
 # ============================================================
 
 def load_sorted_files(CSV_PATH, clinical_data_path):
     df = pd.read_csv(CSV_PATH)
     df_sorted = df.sort_values(by="first_two_product", ascending=True)
-
     files = [os.path.basename(fp) for fp in df_sorted["full_path"].tolist()]
     file_paths = [os.path.join(clinical_data_path, f) for f in files]
     return df_sorted, files, file_paths
@@ -418,100 +362,149 @@ def load_sample_xcol(file_path):
     x_arr = np.load(file_path)
     rows, cols, channels = x_arr.shape
     assert channels == 3, "Expected 3 channels [C,T,A]."
-
-    # keep your orientation rule if desired
     if rows < cols:
         x_arr = x_arr.transpose(1, 0, 2)
         rows, cols, channels = x_arr.shape
-
     x_col = x_arr.reshape(rows * cols * channels, 1)
     return x_col, rows, cols
 
 
 # ============================================================
-# 9) Dataset loss (Torch)
+# 10) Dual-condition loss
 # ============================================================
 
-def dataset_loss_torch(
+def dataset_loss_dual_condition_torch(
     theta_raw,
     samples,
     p_default_base,
     device,
+    # simulation
     NumIter=8400,
     w=0.01,
+    temp=10.0,
+    # with-drug regimen
     dose=200.0,
     interval=21.0,
-    temp=10.0,
+    # class balance for with-drug condition
     pos_weight=2.333,
+    # weights for the two objectives
+    alpha=1.0,   # with-drug classification vs true labels
+    beta=1.0,    # no-drug -> all NR constraint
 ):
-    logits = []
-    ys = []
+    """
+    Enforces:
+      - WITH-DRUG logits match true labels
+      - NO-DRUG logits all behave like NR (target 0)
 
+    Returns a single scalar loss.
+    """
     if len(samples) == 0:
-        # ==== MOD ==== guard empty batch
         return torch.tensor(0.0, dtype=torch.float32, device=device, requires_grad=True)
+
+    logits_drug = []
+    logits_nodrug = []
+    ys_true = []
+
+    # build two eval_u functions
+    u_drug = eval_u_keytruda_input(w=w, dose=dose, interval=interval)
+    u_zero = make_eval_u_zero()
 
     for s in samples:
         p_def = copy.deepcopy(p_default_base)
         p_def.rows = s["rows"]
         p_def.cols = s["cols"]
 
-        _, logit = simulate_pct_change_cancer_torch(
+        # WITH DRUG
+        _, logit_d = simulate_pct_change_cancer_torch_custom_u(
             x_col_np=s["x_col"],
             p_default=p_def,
             theta_raw=theta_raw,
             rows=s["rows"],
             cols=s["cols"],
+            eval_u_func=u_drug,
             NumIter=NumIter,
             w=w,
-            dose=dose,
-            interval=interval,
             temp=temp,
-            device=device,
+            device=device
         )
-        logits.append(logit)
-        ys.append(torch.tensor(s["y"], dtype=torch.float32, device=device))
 
-    z_vec = torch.stack(logits)   # (B,)
-    y_vec = torch.stack(ys)       # (B,)
+        # NO DRUG
+        _, logit_0 = simulate_pct_change_cancer_torch_custom_u(
+            x_col_np=s["x_col"],
+            p_default=p_def,
+            theta_raw=theta_raw,
+            rows=s["rows"],
+            cols=s["cols"],
+            eval_u_func=u_zero,
+            NumIter=NumIter,
+            w=w,
+            temp=temp,
+            device=device
+        )
 
-    # ==== MOD ==== mask out any non-finite logits BEFORE BCE
-    finite_mask = torch.isfinite(z_vec)
-    num_bad = int((~finite_mask).sum().item())
-    if num_bad > 0:
-        print(f"[WARN] Dropping {num_bad} / {len(z_vec)} samples in loss due to non-finite logits.")
-    z_vec = z_vec[finite_mask]
-    y_vec = y_vec[finite_mask]
+        logits_drug.append(logit_d)
+        logits_nodrug.append(logit_0)
+        ys_true.append(torch.tensor(s["y"], dtype=torch.float32, device=device))
 
-    if z_vec.numel() == 0:
-        # everything was bad; return a neutral scalar loss
+    z_drug = torch.stack(logits_drug)
+    z_0 = torch.stack(logits_nodrug)
+    y_true = torch.stack(ys_true)
+
+    # mask non-finite
+    mask_d = torch.isfinite(z_drug)
+    mask_0 = torch.isfinite(z_0)
+
+    z_drug = z_drug[mask_d]
+    y_true_d = y_true[mask_d]
+
+    z_0 = z_0[mask_0]
+
+    # if everything is bad, return neutral
+    if z_drug.numel() == 0 and z_0.numel() == 0:
         return torch.tensor(0.0, dtype=torch.float32, device=device, requires_grad=True)
 
-    pos_w = torch.tensor(pos_weight, dtype=torch.float32, device=device)
-    loss = F.binary_cross_entropy_with_logits(z_vec, y_vec, pos_weight=pos_w)
+    losses = []
 
-    return loss
+    # WITH-DRUG BCE vs true labels
+    if z_drug.numel() > 0:
+        pos_w = torch.tensor(pos_weight, dtype=torch.float32, device=device)
+        loss_drug = F.binary_cross_entropy_with_logits(z_drug, y_true_d, pos_weight=pos_w)
+        losses.append(alpha * loss_drug)
+
+    # NO-DRUG BCE vs ALL-ZEROS
+    if z_0.numel() > 0:
+        y0 = torch.zeros_like(z_0)
+        loss_0 = F.binary_cross_entropy_with_logits(z_0, y0)
+        losses.append(beta * loss_0)
+
+    return torch.stack(losses).sum()
 
 
 # ============================================================
-# 10) Accuracy (Torch, no grad)
+# 11) Dual-condition accuracy reporting
 # ============================================================
 
 def predict_label_from_logit_torch(logit):
     return 1 if float(logit.item()) >= 0 else 0
 
 @torch.no_grad()
-def evaluate_accuracy_torch(
+def evaluate_accuracy_condition_torch(
     theta_raw,
     samples,
     p_default_base,
     device,
+    eval_u_func,
+    target_mode="true",  # "true" or "all_zero"
     NumIter=8400,
     w=0.01,
-    dose=200.0,
-    interval=21.0,
     temp=10.0,
 ):
+    """
+    If target_mode == "true":
+        compare predictions to each sample's y
+    If target_mode == "all_zero":
+        compare predictions to 0 for all samples
+    """
     correct = 0
     total = 0
 
@@ -520,95 +513,38 @@ def evaluate_accuracy_torch(
         p_def.rows = s["rows"]
         p_def.cols = s["cols"]
 
-        _, logit = simulate_pct_change_cancer_torch(
+        _, logit = simulate_pct_change_cancer_torch_custom_u(
             x_col_np=s["x_col"],
             p_default=p_def,
             theta_raw=theta_raw,
             rows=s["rows"],
             cols=s["cols"],
+            eval_u_func=eval_u_func,
             NumIter=NumIter,
             w=w,
-            dose=dose,
-            interval=interval,
             temp=temp,
-            device=device,
+            device=device
         )
 
         if not torch.isfinite(logit):
-            # ==== MOD ==== skip non-finite predictions in accuracy
             continue
 
         pred = predict_label_from_logit_torch(logit)
-        if pred == int(s["y"]):
-            correct += 1
+
+        if target_mode == "true":
+            true = int(s["y"])
+        else:
+            true = 0
+
+        correct += int(pred == true)
         total += 1
 
-    if total == 0:
-        return 0.0
-
-    return correct / total
-
-
-@torch.no_grad()
-def compute_confusion_matrix(
-    theta_raw,
-    samples,
-    p_default_base,
-    device,
-    NumIter=8400,
-    w=0.01,
-    dose=200.0,
-    interval=21.0,
-    temp=10.0,
-):
-    """
-    Compute confusion matrix: [[TN, FP], [FN, TP]]
-    Returns dict with TP, TN, FP, FN counts
-    """
-    TP = TN = FP = FN = 0
-
-    for s in samples:
-        p_def = copy.deepcopy(p_default_base)
-        p_def.rows = s["rows"]
-        p_def.cols = s["cols"]
-
-        _, logit = simulate_pct_change_cancer_torch(
-            x_col_np=s["x_col"],
-            p_default=p_def,
-            theta_raw=theta_raw,
-            rows=s["rows"],
-            cols=s["cols"],
-            NumIter=NumIter,
-            w=w,
-            dose=dose,
-            interval=interval,
-            temp=temp,
-            device=device,
-        )
-
-        if not torch.isfinite(logit):
-            # ==== MOD ==== skip non-finite logits
-            continue
-
-        pred = predict_label_from_logit_torch(logit)
-        true = int(s["y"])
-
-        if pred == 1 and true == 1:
-            TP += 1
-        elif pred == 0 and true == 0:
-            TN += 1
-        elif pred == 1 and true == 0:
-            FP += 1
-        else:  # pred == 0 and true == 1
-            FN += 1
-
-    return {"TP": TP, "TN": TN, "FP": FP, "FN": FN}
+    return correct / max(total, 1)
 
 
 def print_confusion_matrix(cm_dict, dataset_name=""):
     """Print confusion matrix in readable format"""
     TP, TN, FP, FN = cm_dict["TP"], cm_dict["TN"], cm_dict["FP"], cm_dict["FN"]
-    
     print(f"\n{dataset_name} Confusion Matrix:")
     print("                 Predicted")
     print("                 Neg    Pos")
@@ -617,36 +553,92 @@ def print_confusion_matrix(cm_dict, dataset_name=""):
     print(f"\nTP={TP}, TN={TN}, FP={FP}, FN={FN}")
 
 
+def compute_confusion_matrix_condition(
+    theta_raw,
+    samples,
+    p_default_base,
+    device,
+    eval_u_func,
+    target_mode="true",
+    NumIter=8400,
+    w=0.01,
+    temp=10.0,
+):
+    """
+    Compute confusion matrix for given eval_u function and target_mode.
+    target_mode: "true" compares to sample['y']; "all_zero" compares to 0.
+    Returns dict with TP,TN,FP,FN
+    """
+    TP = TN = FP = FN = 0
+    for s in samples:
+        p_def = copy.deepcopy(p_default_base)
+        p_def.rows = s["rows"]
+        p_def.cols = s["cols"]
+
+        _, logit = simulate_pct_change_cancer_torch_custom_u(
+            x_col_np=s["x_col"],
+            p_default=p_def,
+            theta_raw=theta_raw,
+            rows=s["rows"],
+            cols=s["cols"],
+            eval_u_func=eval_u_func,
+            NumIter=NumIter,
+            w=w,
+            temp=temp,
+            device=device,
+        )
+
+        if not torch.isfinite(logit):
+            continue
+
+        pred = predict_label_from_logit_torch(logit)
+        if target_mode == "true":
+            true = int(s["y"]) 
+        else:
+            true = 0
+
+        if pred == 1 and true == 1:
+            TP += 1
+        elif pred == 0 and true == 0:
+            TN += 1
+        elif pred == 1 and true == 0:
+            FP += 1
+        else:
+            FN += 1
+
+    return {"TP": TP, "TN": TN, "FP": FP, "FN": FN}
+
+
 # ============================================================
-# 11) SGD training (with configurable batch size)
+# 12) Optimizer loop (SGD/Adam)
 # ============================================================
 
-def run_sgd_torch(
+def run_sgd_dual_condition_torch(
     train_samples,
     val_samples,
     p_default,
     device,
+    # simulation
     NumIter=8400,
     w=0.01,
+    temp=10.0,
+    # regimen
     dose=200.0,
     interval=21.0,
-    temp=10.0,
-    lr=1e-2,
-    epochs=10,
-    batch_size=None,
+    # loss weights
     pos_weight=2.333,
+    alpha=1.0,
+    beta=1.0,
+    # optimizer
+    lr=1e-2,
+    epochs=50,
+    batch_size=None,
     verbose=True,
     early_stopping=True,
     patience=10,
     min_delta=1e-4,
     monitor="val_loss",
 ):
-    """
-    Stochastic gradient descent training.
-    If batch_size is None or equals len(train_samples), performs full-batch GD.
-    Otherwise, performs SGD with given batch size.
-    Evaluates both train and validation loss/accuracy per epoch.
-    """
     if len(train_samples) == 0:
         raise ValueError("No training samples provided.")
 
@@ -655,102 +647,134 @@ def run_sgd_torch(
         is_full_batch = True
     else:
         is_full_batch = False
-    
+
     theta_raw = pack_from_default_torch(p_default, device=device)
     optimizer = torch.optim.Adam([theta_raw], lr=lr)
 
     history = {
         "train_loss": [],
         "val_loss": [],
-        "train_acc": [],
-        "val_acc": []
+        "train_acc_drug": [],
+        "val_acc_drug": [],
+        "train_acc_nodrug_all0": [],
+        "val_acc_nodrug_all0": [],
     }
 
-    # Early stopping bookkeeping
     best_metric = float("inf") if monitor.endswith("loss") else -float("inf")
     best_theta = theta_raw.detach().clone()
     epochs_no_improve = 0
 
+    # eval_u funcs for accuracy
+    u_drug = eval_u_keytruda_input(w=w, dose=dose, interval=interval)
+    u_zero = make_eval_u_zero()
+
     for ep in range(1, epochs + 1):
-        # Shuffle samples for SGD
         indices = np.random.permutation(len(train_samples))
-        shuffled_samples = [train_samples[i] for i in indices]
-        
+        shuffled = [train_samples[i] for i in indices]
+
         epoch_train_losses = []
-        
-        # Mini-batch training
+
         for batch_start in range(0, len(train_samples), batch_size):
             batch_end = min(batch_start + batch_size, len(train_samples))
-            batch = shuffled_samples[batch_start:batch_end]
-            
+            batch = shuffled[batch_start:batch_end]
+
             optimizer.zero_grad()
-            
-            batch_loss = dataset_loss_torch(
-                theta_raw, batch, p_default, device,
-                NumIter=NumIter, w=w, dose=dose, interval=interval, temp=temp,
-                pos_weight=pos_weight
+
+            batch_loss = dataset_loss_dual_condition_torch(
+                theta_raw=theta_raw,
+                samples=batch,
+                p_default_base=p_default,
+                device=device,
+                NumIter=NumIter,
+                w=w,
+                temp=temp,
+                dose=dose,
+                interval=interval,
+                pos_weight=pos_weight,
+                alpha=alpha,
+                beta=beta
             )
-            
+
             batch_loss.backward()
             optimizer.step()
-            
-            loss_val = float(batch_loss.detach().cpu())
-            epoch_train_losses.append(loss_val)
-        
+
+            epoch_train_losses.append(float(batch_loss.detach().cpu()))
+
         avg_train_loss = float(np.mean(epoch_train_losses))
 
-        # Evaluate validation loss (no grad)
+        # val loss
         if len(val_samples) > 0:
             with torch.no_grad():
-                val_loss = dataset_loss_torch(
-                    theta_raw, val_samples, p_default, device,
-                    NumIter=NumIter, w=w, dose=dose, interval=interval, temp=temp,
-                    pos_weight=pos_weight
+                val_loss = dataset_loss_dual_condition_torch(
+                    theta_raw=theta_raw,
+                    samples=val_samples,
+                    p_default_base=p_default,
+                    device=device,
+                    NumIter=NumIter,
+                    w=w,
+                    temp=temp,
+                    dose=dose,
+                    interval=interval,
+                    pos_weight=pos_weight,
+                    alpha=alpha,
+                    beta=beta
                 )
                 avg_val_loss = float(val_loss.detach().cpu())
         else:
-            avg_val_loss = float('nan')
-        
-        # Compute accuracies
-        train_acc = evaluate_accuracy_torch(
+            avg_val_loss = float("nan")
+
+        # accuracies:
+        train_acc_drug = evaluate_accuracy_condition_torch(
             theta_raw, train_samples, p_default, device,
+            eval_u_func=u_drug, target_mode="true",
             NumIter=NumIter, w=w, temp=temp
         )
-        val_acc = evaluate_accuracy_torch(
+        val_acc_drug = evaluate_accuracy_condition_torch(
             theta_raw, val_samples, p_default, device,
+            eval_u_func=u_drug, target_mode="true",
             NumIter=NumIter, w=w, temp=temp
-        ) if len(val_samples) > 0 else float('nan')
-        
+        ) if len(val_samples) > 0 else float("nan")
+
+        train_acc_nodrug = evaluate_accuracy_condition_torch(
+            theta_raw, train_samples, p_default, device,
+            eval_u_func=u_zero, target_mode="all_zero",
+            NumIter=NumIter, w=w, temp=temp
+        )
+        val_acc_nodrug = evaluate_accuracy_condition_torch(
+            theta_raw, val_samples, p_default, device,
+            eval_u_func=u_zero, target_mode="all_zero",
+            NumIter=NumIter, w=w, temp=temp
+        ) if len(val_samples) > 0 else float("nan")
+
         history["train_loss"].append(avg_train_loss)
         history["val_loss"].append(avg_val_loss)
-        history["train_acc"].append(train_acc)
-        history["val_acc"].append(val_acc)
-        
-        mode_str = "[GD]" if is_full_batch else f"[SGD bs={batch_size}]"
-        if verbose:
-            print(f"{mode_str} Epoch {ep:03d} | train_loss {avg_train_loss:.4f} | val_loss {avg_val_loss:.4f} | train_acc {train_acc:.3f} | val_acc {val_acc:.3f}", flush=True)
+        history["train_acc_drug"].append(train_acc_drug)
+        history["val_acc_drug"].append(val_acc_drug)
+        history["train_acc_nodrug_all0"].append(train_acc_nodrug)
+        history["val_acc_nodrug_all0"].append(val_acc_nodrug)
 
-        # Determine metric for early stopping
+        mode_str = "[GD]" if is_full_batch else f"[SGD bs={batch_size}]"
+
+        if verbose:
+            print(
+                f"{mode_str} Epoch {ep:03d} | "
+                f"train_loss {avg_train_loss:.4f} | val_loss {avg_val_loss:.4f} | "
+                f"drug_acc tr {train_acc_drug:.3f} va {val_acc_drug:.3f} | "
+                f"noDrug(allNR)_acc tr {train_acc_nodrug:.3f} va {val_acc_nodrug:.3f}",
+                flush=True
+            )
+
+        # early stopping metric
         if monitor == "val_loss" and not np.isnan(avg_val_loss):
             current_metric = avg_val_loss
             improved = current_metric < (best_metric - min_delta)
         elif monitor == "train_loss":
             current_metric = avg_train_loss
             improved = current_metric < (best_metric - min_delta)
-        elif monitor == "val_acc" and not np.isnan(val_acc):
-            current_metric = val_acc
-            improved = current_metric > (best_metric + min_delta)
-        elif monitor == "train_acc":
-            current_metric = train_acc
-            improved = current_metric > (best_metric + min_delta)
         else:
-            # default to val_loss when valid, else train_loss
-            if not np.isnan(avg_val_loss):
-                current_metric = avg_val_loss
-                improved = current_metric < (best_metric - min_delta)
-            else:
-                current_metric = avg_train_loss
-                improved = current_metric < (best_metric - min_delta)
+            # default
+            current_metric = avg_val_loss if not np.isnan(avg_val_loss) else avg_train_loss
+            improved = current_metric < (best_metric - min_delta)
 
         if improved:
             best_metric = current_metric
@@ -761,14 +785,17 @@ def run_sgd_torch(
 
         if early_stopping and epochs_no_improve >= patience:
             if verbose:
-                print(f"Early stopping at epoch {ep} (no improvement in {patience} epochs). Restoring best weights from epoch {ep - epochs_no_improve}.")
+                print(
+                    f"Early stopping at epoch {ep} "
+                    f"(no improvement in {patience} epochs)."
+                )
             return best_theta, history
 
     return theta_raw, history
 
 
 # ============================================================
-# 12) Main
+# 13) Main
 # ============================================================
 
 if __name__ == "__main__":
@@ -780,22 +807,29 @@ if __name__ == "__main__":
     CSV_PATH = "data_preprocessing_notebooks/npy_dimensions_sorted.csv"
     slide_response_path = "data/nature_immune_processed/slide_responses.csv"
 
-    # ---------- Debug hyperparams ----------
-    TOP_TRAIN = 20
-    NumIter = 100     # start small, then scale up
+    # ---------- Hyperparams (keep small for debug; scale later) ----------
+    NumIter = 100
     w = 0.1
     temp = 10.0
-    pos_weight = 2.333
 
-    lr = 0.01
-    epochs = 100
-    batch_size = 4  # None or len(train_samples) for full-batch GD; set to smaller value for SGD (e.g., 4)
-    train_val_ratio = 0.7  # 70% train, 30% validation
+    dose = 200.0
+    interval = 21.0
+
+    pos_weight = 1 #2.333
+
+    # dual-objective weights
+    alpha = 1.0   # with-drug classification importance
+    beta = 1.0    # enforce all-NR under no-drug
+
+    lr = 0.1
+    epochs = 10
+    batch_size = 4
+    train_val_ratio = 0.7
 
     # ---------- Defaults ----------
     p_default = Params(
-        lambda_C=0.7, K_C=28, d_C=0.01, k_T=4, K_K=25, D_C=0.01,
-        lambda_T=0.05, K_T=10, K_R=10, d_T=0.01, k_A=0.16, K_A=100, D_T=0.1,
+        lambda_C=1.5, K_C=40, d_C=0.01, k_T=0.01, K_K=25, D_C=0.01,
+        lambda_T=0.0001, K_T=10, K_R=10, d_T=0.3, k_A=0.50, K_A=100, D_T=0.1,
         d_A=0.0315, rows=1, cols=1
     )
 
@@ -823,25 +857,22 @@ if __name__ == "__main__":
             "y": y,
         })
 
-        # if len(samples) >= (TOP_TRAIN + 5):
-        #     break
-
-    # Split train/val by ratio
-    np.random.seed(42)  # For reproducibility (again, to also affect split)
+    # ---------- Train/Val split ----------
+    np.random.seed(42)
     indices = np.random.permutation(len(samples))
     n_train = int(len(samples) * train_val_ratio)
-    
+
     train_indices = indices[:n_train]
     val_indices = indices[n_train:]
-    
+
     train_samples = [samples[i] for i in train_indices]
     val_samples = [samples[i] for i in val_indices]
 
     print(f"Train samples: {len(train_samples)}")
     print(f"Val samples:   {len(val_samples)}")
 
-    # ---------- Train ----------
-    theta_raw_star, history = run_sgd_torch(
+    # ---------- Optimize with dual-condition objective ----------
+    theta_raw_star, history = run_sgd_dual_condition_torch(
         train_samples=train_samples,
         val_samples=val_samples,
         p_default=p_default,
@@ -849,39 +880,79 @@ if __name__ == "__main__":
         NumIter=NumIter,
         w=w,
         temp=temp,
+        dose=dose,
+        interval=interval,
+        pos_weight=pos_weight,
+        alpha=alpha,
+        beta=beta,
         lr=lr,
         epochs=epochs,
         batch_size=batch_size,
-        pos_weight=pos_weight,
         verbose=True
     )
 
-    # ---------- Validate ONCE ----------
-    train_acc = evaluate_accuracy_torch(
+    # ---------- Final evaluation for both conditions ----------
+    u_drug = eval_u_keytruda_input(w=w, dose=dose, interval=interval)
+    u_zero = make_eval_u_zero()
+
+    train_acc_drug = evaluate_accuracy_condition_torch(
         theta_raw_star, train_samples, p_default, device,
+        eval_u_func=u_drug, target_mode="true",
         NumIter=NumIter, w=w, temp=temp
     )
-    val_acc = evaluate_accuracy_torch(
+    val_acc_drug = evaluate_accuracy_condition_torch(
         theta_raw_star, val_samples, p_default, device,
+        eval_u_func=u_drug, target_mode="true",
         NumIter=NumIter, w=w, temp=temp
     )
 
-    print("\nFinal accuracy:")
-    print(f"  Train acc: {train_acc:.3f}")
-    print(f"  Val acc:   {val_acc:.3f}")
-
-    # ---------- Confusion matrices ----------
-    train_cm = compute_confusion_matrix(
+    train_acc_nodrug = evaluate_accuracy_condition_torch(
         theta_raw_star, train_samples, p_default, device,
+        eval_u_func=u_zero, target_mode="all_zero",
         NumIter=NumIter, w=w, temp=temp
     )
-    val_cm = compute_confusion_matrix(
+    val_acc_nodrug = evaluate_accuracy_condition_torch(
         theta_raw_star, val_samples, p_default, device,
+        eval_u_func=u_zero, target_mode="all_zero",
         NumIter=NumIter, w=w, temp=temp
     )
 
-    print_confusion_matrix(train_cm, "Train")
-    print_confusion_matrix(val_cm, "Validation")
+    print("\nFinal accuracy (WITH DRUG, true labels):")
+    print(f"  Train acc: {train_acc_drug:.3f}")
+    print(f"  Val acc:   {val_acc_drug:.3f}")
+
+    print("\nFinal accuracy (NO DRUG, target ALL NR):")
+    print(f"  Train acc: {train_acc_nodrug:.3f}")
+    print(f"  Val acc:   {val_acc_nodrug:.3f}")
+
+    # ---------- Confusion matrices for both conditions ----------
+    train_cm_drug = compute_confusion_matrix_condition(
+        theta_raw_star, train_samples, p_default, device,
+        eval_u_func=u_drug, target_mode="true",
+        NumIter=NumIter, w=w, temp=temp
+    )
+    val_cm_drug = compute_confusion_matrix_condition(
+        theta_raw_star, val_samples, p_default, device,
+        eval_u_func=u_drug, target_mode="true",
+        NumIter=NumIter, w=w, temp=temp
+    )
+
+    train_cm_nodrug = compute_confusion_matrix_condition(
+        theta_raw_star, train_samples, p_default, device,
+        eval_u_func=u_zero, target_mode="all_zero",
+        NumIter=NumIter, w=w, temp=temp
+    )
+    val_cm_nodrug = compute_confusion_matrix_condition(
+        theta_raw_star, val_samples, p_default, device,
+        eval_u_func=u_zero, target_mode="all_zero",
+        NumIter=NumIter, w=w, temp=temp
+    )
+
+    print_confusion_matrix(train_cm_drug, "Train (WITH DRUG)")
+    print_confusion_matrix(val_cm_drug, "Val   (WITH DRUG)")
+
+    print_confusion_matrix(train_cm_nodrug, "Train (NO DRUG)")
+    print_confusion_matrix(val_cm_nodrug, "Val   (NO DRUG)")
 
     # ---------- Report learned params ----------
     theta_pos = theta_raw_to_positive(theta_raw_star).detach().cpu().numpy()
@@ -892,45 +963,59 @@ if __name__ == "__main__":
         print(f"  {k}: {learned[k]:.6g}")
 
     # ---------- Plot training curves ----------
-    out_dir = "test_clinical_data_visualization_torch"
+    out_dir = "final_report_drug_modeling_dual_objective"
     os.makedirs(out_dir, exist_ok=True)
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
-    
     epochs_list = list(range(1, len(history["train_loss"]) + 1))
-    
-    # Loss curves
-    ax1.plot(epochs_list, history["train_loss"], 'b-o', label='Train Loss', markersize=4)
-    ax1.plot(epochs_list, history["val_loss"], 'r-s', label='Val Loss', markersize=4)
-    ax1.set_xlabel('Epoch')
-    ax1.set_ylabel('Loss')
-    ax1.set_title('Training and Validation Loss')
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
-    
-    # Accuracy curves
-    ax2.plot(epochs_list, history["train_acc"], 'b-o', label='Train Acc', markersize=4)
-    ax2.plot(epochs_list, history["val_acc"], 'r-s', label='Val Acc', markersize=4)
-    ax2.set_xlabel('Epoch')
-    ax2.set_ylabel('Accuracy')
-    ax2.set_title('Training and Validation Accuracy')
-    ax2.legend()
-    ax2.grid(True, alpha=0.3)
-    ax2.set_ylim([0, 1])
-    
+
+    # Loss
+    plt.figure(figsize=(6, 4))
+    plt.plot(epochs_list, history["train_loss"], label="Train Loss")
+    plt.plot(epochs_list, history["val_loss"], label="Val Loss")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.title("Dual-Objective Loss")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
     plt.tight_layout()
-    plot_path = os.path.join(out_dir, "training_curves.png")
-    plt.savefig(plot_path, dpi=150)
-    print(f"\nSaved training curves to {plot_path}")
-    
-    # Save history as CSV
+    plt.savefig(os.path.join(out_dir, "loss_curves.png"), dpi=150)
+
+    # Acc (with drug)
+    plt.figure(figsize=(6, 4))
+    plt.plot(epochs_list, history["train_acc_drug"], label="Train Acc (Drug)")
+    plt.plot(epochs_list, history["val_acc_drug"], label="Val Acc (Drug)")
+    plt.xlabel("Epoch")
+    plt.ylabel("Accuracy")
+    plt.title("Accuracy with Drug (True Labels)")
+    plt.ylim([0, 1])
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_dir, "acc_drug_curves.png"), dpi=150)
+
+    # Acc (no drug all NR)
+    plt.figure(figsize=(6, 4))
+    plt.plot(epochs_list, history["train_acc_nodrug_all0"], label="Train Acc (NoDrug->AllNR)")
+    plt.plot(epochs_list, history["val_acc_nodrug_all0"], label="Val Acc (NoDrug->AllNR)")
+    plt.xlabel("Epoch")
+    plt.ylabel("Accuracy")
+    plt.title("Accuracy without Drug (Target All NR)")
+    plt.ylim([0, 1])
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_dir, "acc_nodrug_curves.png"), dpi=150)
+
+    # Save history CSV
     history_df = pd.DataFrame({
         "epoch": epochs_list,
         "train_loss": history["train_loss"],
         "val_loss": history["val_loss"],
-        "train_acc": history["train_acc"],
-        "val_acc": history["val_acc"]
+        "train_acc_drug": history["train_acc_drug"],
+        "val_acc_drug": history["val_acc_drug"],
+        "train_acc_nodrug_all0": history["train_acc_nodrug_all0"],
+        "val_acc_nodrug_all0": history["val_acc_nodrug_all0"],
     })
-    csv_path = os.path.join(out_dir, "training_history.csv")
-    history_df.to_csv(csv_path, index=False)
-    print(f"Saved training history to {csv_path}")
+    history_df.to_csv(os.path.join(out_dir, "training_history.csv"), index=False)
+
+    print(f"\nSaved outputs to: {out_dir}")
