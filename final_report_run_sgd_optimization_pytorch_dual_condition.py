@@ -88,24 +88,45 @@ OPT_NAMES = [
     "lambda_T", "K_T", "K_R", "d_T", "k_A", "D_T",
 ]
 
+# Parameters that are allowed to be signed and constrained to [-1, 1]
+SIGNED_PARAMS = ["D_C", "D_T"]
+
 def softplus_torch(x):
     return F.softplus(x)
 
 def inv_softplus_torch(y, eps=1e-8):
     return torch.log(torch.exp(y) - 1.0 + eps)
 
+
+def inv_tanh(y, eps=1e-6):
+    y_clamped = torch.clamp(y, -1.0 + eps, 1.0 - eps)
+    return 0.5 * torch.log((1.0 + y_clamped) / (1.0 - y_clamped))
+
 def pack_from_default_torch(p_default, device):
-    vals = torch.tensor([getattr(p_default, k) for k in OPT_NAMES],
-                        dtype=torch.float32, device=device)
-    theta_raw = inv_softplus_torch(vals)
+    defaults = [getattr(p_default, k) for k in OPT_NAMES]
+    theta_raw_list = []
+    for name, val in zip(OPT_NAMES, defaults):
+        if name in SIGNED_PARAMS:
+            v = float(np.clip(val, 0, 0.999999))
+            theta_raw_list.append(inv_tanh(torch.tensor(v, dtype=torch.float32, device=device)))
+        else:
+            theta_raw_list.append(inv_softplus_torch(torch.tensor(float(val), dtype=torch.float32, device=device)))
+
+    theta_raw = torch.stack(theta_raw_list)
     theta_raw.requires_grad_(True)
     return theta_raw
 
 def theta_raw_to_positive(theta_raw):
-    theta_pos = softplus_torch(theta_raw)
-    # keep parameters in a sane range
-    theta_pos = torch.clamp(theta_pos, 1e-6, 1e3)
-    return theta_pos
+    parts = []
+    for i, name in enumerate(OPT_NAMES):
+        val_raw = theta_raw[i]
+        if name in SIGNED_PARAMS:
+            parts.append(torch.tanh(val_raw))
+        else:
+            p = softplus_torch(val_raw)
+            p = torch.clamp(p, 1e-6, 1e3)
+            parts.append(p)
+    return torch.stack(parts)
 
 
 # ============================================================
@@ -162,7 +183,7 @@ def eval_f_torch(x_col, theta_pos, p_fixed, r_A):
     d_T      = theta_pos[9]
     k_A      = theta_pos[10]
     D_T      = theta_pos[11]
-
+    
     eps = 1e-12
 
     x_flat = x_col.view(-1)
@@ -815,14 +836,14 @@ if __name__ == "__main__":
     dose = 200.0
     interval = 21.0
 
-    pos_weight = 1 #2.333
+    pos_weight = 2.333
 
     # dual-objective weights
-    alpha = 1.0   # with-drug classification importance
-    beta = 1.0    # enforce all-NR under no-drug
+    alpha = 2.0   # with-drug classification importance
+    beta = 0.2    # enforce all-NR under no-drug
 
-    lr = 0.1
-    epochs = 10
+    lr = 0.01
+    epochs = 100
     batch_size = 4
     train_val_ratio = 0.7
 
@@ -961,6 +982,68 @@ if __name__ == "__main__":
     print("\nLearned parameters:")
     for k in OPT_NAMES:
         print(f"  {k}: {learned[k]:.6g}")
+
+    # ---------- Save learned parameters to out_dir ----------
+    out_dir = "final_report_drug_modeling_dual_objective"
+    os.makedirs(out_dir, exist_ok=True)
+    params_path = os.path.join(out_dir, "learned_parameters.csv")
+    pd.DataFrame([learned]).to_csv(params_path, index=False)
+    print(f"Saved learned parameters to: {params_path}")
+
+    # ---------- Per-sample predictions under both conditions ----------
+    per_sample = []
+    for s in train_samples + val_samples:
+        sid = s.get("sample_id", "")
+        y_true = int(s["y"])
+
+        # drug prediction
+        _, logit_drug = simulate_pct_change_cancer_torch_custom_u(
+            x_col_np=s["x_col"], p_default=p_default, theta_raw=theta_raw_star,
+            rows=s["rows"], cols=s["cols"], eval_u_func=u_drug,
+            NumIter=NumIter, w=w, temp=temp, device=device
+        )
+        pred_drug = predict_label_from_logit_torch(logit_drug) if torch.isfinite(logit_drug) else None
+
+        # no-drug prediction
+        _, logit_nodrug = simulate_pct_change_cancer_torch_custom_u(
+            x_col_np=s["x_col"], p_default=p_default, theta_raw=theta_raw_star,
+            rows=s["rows"], cols=s["cols"], eval_u_func=u_zero,
+            NumIter=NumIter, w=w, temp=temp, device=device
+        )
+        pred_nodrug = predict_label_from_logit_torch(logit_nodrug) if torch.isfinite(logit_nodrug) else None
+
+        correct_drug = (pred_drug is not None) and (pred_drug == y_true)
+        correct_nodrug = (pred_nodrug is not None) and (pred_nodrug == 0)
+
+        per_sample.append({
+            "sample_id": sid,
+            "y_true": y_true,
+            "pred_drug": pred_drug,
+            "pred_nodrug": pred_nodrug,
+            "correct_drug": correct_drug,
+            "correct_nodrug": correct_nodrug,
+        })
+
+    per_sample_df = pd.DataFrame(per_sample)
+    per_sample_csv = os.path.join(out_dir, "per_sample_predictions.csv")
+    per_sample_df.to_csv(per_sample_csv, index=False)
+    print(f"Saved per-sample predictions to: {per_sample_csv}")
+
+    # Individuals that satisfy three conditions simultaneously:
+    #   - true label == R (y_true == 1)
+    #   - correctly predicted under the drug condition
+    #   - correctly predicted under the no-drug condition (predicted NR)
+    triple_correct = per_sample_df[
+        (per_sample_df["y_true"] == 1) &
+        (per_sample_df["correct_drug"]) &
+        (per_sample_df["correct_nodrug"])
+    ]
+
+    print(f"\nCount samples that are R and correctly predicted in BOTH conditions: {len(triple_correct)}")
+    if len(triple_correct) > 0:
+        print("Samples (sample_id) that are R and correct under drug and no-drug:")
+        for sid in triple_correct["sample_id"].tolist():
+            print(f"  {sid}")
 
     # ---------- Plot training curves ----------
     out_dir = "final_report_drug_modeling_dual_objective"
