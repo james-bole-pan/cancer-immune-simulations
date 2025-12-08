@@ -86,7 +86,7 @@ OPT_NAMES = [
     "lambda_C", "K_C", "d_C", "k_T", "K_K", "D_C",
     "lambda_T", "K_T", "K_R", "d_T", "k_A", "D_T",
 ]
-SIGNED_PARAMS = ["D_C", "D_T"]
+SIGNED_PARAMS = [] # ["D_C", "D_T"]
 
 def softplus_torch(x):
     return F.softplus(x)
@@ -202,10 +202,11 @@ def eval_f_torch(x_col, theta_pos, p_fixed, r_A):
     )
 
     drug_boost = (k_A * A) / (A + K_A + eps)
+    crowd = 1.0 / (1.0 + T / (K_T + eps))
     dTdt = (
         lambda_T * (C / (C + K_R + eps)) * (1.0 - T / (K_T + eps))
         - d_T * T
-        + drug_boost * T
+        + drug_boost * T * crowd
         + D_T * lapT
     )
 
@@ -716,7 +717,7 @@ def print_drug_class_metrics(title, cm):
 #         return dict(alpha_drug_cls=1.0, beta_baseline=0.1, gamma=1.0)
 
 def get_phase_weights(ep, epochs):
-    return dict(alpha_drug_cls=1.0, beta_baseline=0.1, gamma=0.1)
+    return dict(alpha_drug_cls=1.0, beta_baseline=0.3, gamma=0.1)
 
 def run_sgd_responder_benefit_torch(
     train_samples,
@@ -736,6 +737,7 @@ def run_sgd_responder_benefit_torch(
     patience=12,
     min_delta=1e-4,
     benefit_margin_pct=5.0,
+    val_interval=1,
 ):
     if len(train_samples) == 0:
         raise ValueError("No training samples provided.")
@@ -768,6 +770,7 @@ def run_sgd_responder_benefit_torch(
         "alpha_drug_cls": [],
         "beta_baseline": [],
         "gamma": [],
+        "evaluated": [],  # True when monitoring/validation ran this epoch
     }
 
     best_metric = float("inf")
@@ -809,14 +812,18 @@ def run_sgd_responder_benefit_torch(
             )
 
             batch_loss.backward()
+            torch.nn.utils.clip_grad_norm_([theta_raw], max_norm=1.0)
             optimizer.step()
 
             epoch_train_losses.append(float(batch_loss.detach().cpu()))
 
         avg_train_loss = float(np.mean(epoch_train_losses)) if epoch_train_losses else 0.0
 
-        # val loss
-        if len(val_samples) > 0:
+        # monitoring (train + val) only every val_interval epochs to save compute
+        monitor_epoch = (ep % val_interval == 0)
+        val_evaluated = len(val_samples) > 0 and monitor_epoch
+
+        if val_evaluated:
             with torch.no_grad():
                 val_loss = dataset_loss_responder_benefit_torch(
                     theta_raw=theta_raw,
@@ -836,37 +843,42 @@ def run_sgd_responder_benefit_torch(
                 )
                 avg_val_loss = float(val_loss.detach().cpu())
         else:
-            avg_val_loss = float("nan")
+            avg_val_loss = None
 
         # monitoring
-        train_acc_drug = evaluate_accuracy_drug(
-            theta_raw, train_samples, p_default, device,
-            NumIter=NumIter, w=w, temp=temp, dose=dose, interval=interval
-        )
-        val_acc_drug = evaluate_accuracy_drug(
-            theta_raw, val_samples, p_default, device,
-            NumIter=NumIter, w=w, temp=temp, dose=dose, interval=interval
-        ) if len(val_samples) > 0 else float("nan")
+        if monitor_epoch:
+            train_acc_drug = evaluate_accuracy_drug(
+                theta_raw, train_samples, p_default, device,
+                NumIter=NumIter, w=w, temp=temp, dose=dose, interval=interval
+            )
+            val_acc_drug = evaluate_accuracy_drug(
+                theta_raw, val_samples, p_default, device,
+                NumIter=NumIter, w=w, temp=temp, dose=dose, interval=interval
+            ) if val_evaluated else None
 
-        train_acc_nodrug = evaluate_accuracy_nodrug_allNR(
-            theta_raw, train_samples, p_default, device,
-            NumIter=NumIter, w=w, temp=temp
-        )
-        val_acc_nodrug = evaluate_accuracy_nodrug_allNR(
-            theta_raw, val_samples, p_default, device,
-            NumIter=NumIter, w=w, temp=temp
-        ) if len(val_samples) > 0 else float("nan")
+            train_acc_nodrug = evaluate_accuracy_nodrug_allNR(
+                theta_raw, train_samples, p_default, device,
+                NumIter=NumIter, w=w, temp=temp
+            )
+            val_acc_nodrug = evaluate_accuracy_nodrug_allNR(
+                theta_raw, val_samples, p_default, device,
+                NumIter=NumIter, w=w, temp=temp
+            ) if val_evaluated else None
 
-        train_benefit_R = evaluate_responder_benefit_rate(
-            theta_raw, train_samples, p_default, device,
-            NumIter=NumIter, w=w, temp=temp, dose=dose, interval=interval,
-            benefit_margin_pct=benefit_margin_pct
-        )
-        val_benefit_R = evaluate_responder_benefit_rate(
-            theta_raw, val_samples, p_default, device,
-            NumIter=NumIter, w=w, temp=temp, dose=dose, interval=interval,
-            benefit_margin_pct=benefit_margin_pct
-        ) if len(val_samples) > 0 else float("nan")
+            train_benefit_R = evaluate_responder_benefit_rate(
+                theta_raw, train_samples, p_default, device,
+                NumIter=NumIter, w=w, temp=temp, dose=dose, interval=interval,
+                benefit_margin_pct=benefit_margin_pct
+            )
+            val_benefit_R = evaluate_responder_benefit_rate(
+                theta_raw, val_samples, p_default, device,
+                NumIter=NumIter, w=w, temp=temp, dose=dose, interval=interval,
+                benefit_margin_pct=benefit_margin_pct
+            ) if val_evaluated else None
+        else:
+            train_acc_drug = val_acc_drug = None
+            train_acc_nodrug = val_acc_nodrug = None
+            train_benefit_R = val_benefit_R = None
 
         history["train_loss"].append(avg_train_loss)
         history["val_loss"].append(avg_val_loss)
@@ -879,33 +891,53 @@ def run_sgd_responder_benefit_torch(
         history["alpha_drug_cls"].append(alpha_drug_cls)
         history["beta_baseline"].append(beta_baseline)
         history["gamma"].append(gamma)
+        history["evaluated"].append(bool(monitor_epoch))
 
         mode_str = "[GD]" if is_full_batch else f"[SGD bs={batch_size}]"
         if verbose:
-            print(
-                f"{mode_str} Epoch {ep:03d} | "
-                f"train_loss {avg_train_loss:.4f} | val_loss {avg_val_loss:.4f} | "
-                f"alpha {alpha_drug_cls:.2f} beta {beta_baseline:.2f} gamma {gamma:.2f} | "
-                f"drug_acc tr {train_acc_drug:.3f} va {val_acc_drug:.3f} | "
-                f"noDrug->NR tr {train_acc_nodrug:.3f} va {val_acc_nodrug:.3f} | "
-                f"R-benefit tr {train_benefit_R:.3f} va {val_benefit_R:.3f}",
-                flush=True
-            )
+            if monitor_epoch:
+                if val_evaluated:
+                    print(
+                        f"{mode_str} Epoch {ep:03d} | "
+                        f"train_loss {avg_train_loss:.4f} | val_loss {avg_val_loss:.4f} | "
+                        f"alpha {alpha_drug_cls:.2f} beta {beta_baseline:.2f} gamma {gamma:.2f} | "
+                        f"drug_acc tr {train_acc_drug:.3f} va {val_acc_drug:.3f} | "
+                        f"noDrug->NR tr {train_acc_nodrug:.3f} va {val_acc_nodrug:.3f} | "
+                        f"R-benefit tr {train_benefit_R:.3f} va {val_benefit_R:.3f}",
+                        flush=True
+                    )
+                else:
+                    print(
+                        f"{mode_str} Epoch {ep:03d} | "
+                        f"train_loss {avg_train_loss:.4f} | val_loss (skipped) | "
+                        f"alpha {alpha_drug_cls:.2f} beta {beta_baseline:.2f} gamma {gamma:.2f} | "
+                        f"drug_acc tr {train_acc_drug:.3f} | "
+                        f"noDrug->NR tr {train_acc_nodrug:.3f} | "
+                        f"R-benefit tr {train_benefit_R:.3f}",
+                        flush=True
+                    )
+            else:
+                print(
+                    f"{mode_str} Epoch {ep:03d} | "
+                    f"train_loss {avg_train_loss:.4f} | monitoring skipped (interval={val_interval})",
+                    flush=True
+                )
 
-        current_metric = avg_val_loss if not np.isnan(avg_val_loss) else avg_train_loss
-        improved = current_metric < (best_metric - min_delta)
+        if monitor_epoch:
+            current_metric = avg_val_loss if (val_evaluated and avg_val_loss is not None) else avg_train_loss
+            improved = current_metric < (best_metric - min_delta)
 
-        if improved:
-            best_metric = current_metric
-            best_theta = theta_raw.detach().clone()
-            epochs_no_improve = 0
-        else:
-            epochs_no_improve += 1
+            if improved:
+                best_metric = current_metric
+                best_theta = theta_raw.detach().clone()
+                epochs_no_improve = 0
+            else:
+                epochs_no_improve += 1
 
-        if early_stopping and epochs_no_improve >= patience:
-            if verbose:
-                print(f"Early stopping at epoch {ep} (no improvement in {patience} epochs).")
-            return best_theta, history
+            if early_stopping and epochs_no_improve >= patience:
+                if verbose:
+                    print(f"Early stopping at epoch {ep} (no improvement in {patience} monitored epochs).")
+                return best_theta, history
 
     return theta_raw, history
 
@@ -942,7 +974,7 @@ if __name__ == "__main__":
     # ============================================================
     # 3) Hyperparams (debug-friendly)
     # ============================================================
-    NumIter = 100
+    NumIter = 630
     w = 0.1
     temp = 10.0
 
@@ -950,7 +982,7 @@ if __name__ == "__main__":
     interval = 21.0
 
     lr = 0.01
-    epochs = 20
+    epochs = 100
     batch_size = 4
     train_val_ratio = 0.7
 
@@ -960,8 +992,8 @@ if __name__ == "__main__":
     # 4) Defaults
     # ============================================================
     p_default = Params(
-        lambda_C=1.5, K_C=40, d_C=0.01, k_T=0.01, K_K=25, D_C=0.01,
-        lambda_T=0.0001, K_T=10, K_R=10, d_T=0.3, k_A=10, K_A=100, D_T=0.1,
+        lambda_C=0.33, K_C=40, d_C=0.01, k_T=2, K_K=25, D_C=0.01,
+        lambda_T=0.0001, K_T=25, K_R=20, d_T=0.3, k_A=0.5, K_A=100, D_T=0.1,
         d_A=0.0315, rows=1, cols=1
     )
 
@@ -1138,6 +1170,10 @@ if __name__ == "__main__":
     # ============================================================
     theta_pos_np = theta_raw_to_params(theta_raw_star).detach().cpu().numpy()
     learned = {k: float(v) for k, v in zip(OPT_NAMES, theta_pos_np)}
+    # print out learned parameters
+    print("\nLearned Parameters:")
+    for k, v in learned.items():
+        print(f"  {k}: {v:.6f}")
 
     out_dir = "final_report_drug_modeling_counterfactual_minpath"
     os.makedirs(out_dir, exist_ok=True)
@@ -1147,7 +1183,15 @@ if __name__ == "__main__":
     print(f"\nSaved learned parameters to: {params_path}")
 
     # ============================================================
-    # 13) Per-sample predictions CSV
+    # 13) Save training history
+    # ============================================================
+    history_df = pd.DataFrame(history)
+    history_csv = os.path.join(out_dir, "training_history.csv")
+    history_df.to_csv(history_csv, index=False)
+    print(f"Saved training history to: {history_csv}")
+
+    # ============================================================
+    # 14) Per-sample predictions CSV
     # ============================================================
     per_sample = []
     all_samples = train_samples + val_samples
@@ -1194,6 +1238,8 @@ if __name__ == "__main__":
     with open(cms_path, "w") as fh:
         json.dump({"train": cm_train, "val": cm_val, "all": cm_all}, fh, indent=2)
     print(f"Saved drug confusion matrices to: {cms_path}")
+
+    
 
     # ============================================================
     # 14) Final visualizations per sample (WITH + NO DRUG)
