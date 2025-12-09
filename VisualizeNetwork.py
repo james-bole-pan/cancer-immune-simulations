@@ -9,7 +9,7 @@ from pathlib import Path
 
 def visualizeNetwork(
     x: np.ndarray,                    # shape (N, 1)
-    p: Params,                        # provides rows, cols
+    p,                        # provides rows, cols
     title_prefix: str = "",
     figsize: Tuple[float, float] = (12.0, 4.0),
     cmap_C: str = "Reds",
@@ -24,8 +24,8 @@ def visualizeNetwork(
     Visualize spatial distributions of Cancer (C), T cells (T), and Drug (A)
     from a column vector x (N,1), save a single combined image, and return (fig, axes, save_path).
     """
-    if not isinstance(p, Params):
-        raise TypeError(f"'p' must be Params, got {type(p).__name__}")
+    # if not isinstance(p, Params):
+    #     raise TypeError(f"'p' must be Params, got {type(p).__name__}")
 
     rows, cols = p.rows, p.cols
     expected_N = rows * cols * 3
@@ -40,8 +40,9 @@ def visualizeNetwork(
     x_rc3 = x.ravel(order="C").reshape(rows, cols, 3, order="C")
     C, T, A = x_rc3[:, :, 0], x_rc3[:, :, 1], x_rc3[:, :, 2]
 
-    # threshold below which drug will be rendered as pure white
+    # thresholds below which drug / T cell will be rendered as pure white
     DRUG_THRESHOLD = 0.1
+    T_THRESHOLD = 0.1
 
     # plot (single combined figure)
     fig, axes = plt.subplots(1, 3, figsize=figsize)
@@ -55,6 +56,16 @@ def visualizeNetwork(
         if 'Drug' in ttl or ttl.strip().endswith('(A)'):
             arr = np.asarray(data)
             masked = np.ma.masked_where(arr < DRUG_THRESHOLD, arr)
+            cmap_obj = plt.cm.get_cmap(cmap) if isinstance(cmap, str) else cmap
+            try:
+                cmap_obj.set_bad('white')
+            except Exception:
+                pass
+            im = ax.imshow(masked, cmap=cmap_obj, origin="lower")
+        # if this is the T cells panel, mask small T values to white
+        elif 'T cells' in ttl or ttl.strip().endswith('(T)'):
+            arr = np.asarray(data)
+            masked = np.ma.masked_where(arr < T_THRESHOLD, arr)
             cmap_obj = plt.cm.get_cmap(cmap) if isinstance(cmap, str) else cmap
             try:
                 cmap_obj.set_bad('white')
@@ -142,8 +153,14 @@ def create_network_evolution_gif(
     drug_cmap   = LinearSegmentedColormap.from_list("drug",   ["white", "green", "darkgreen"])
     # ensure masked/low drug values render strictly white
     DRUG_THRESHOLD = 0.1
+    # ensure masked/low T values render strictly white
+    T_THRESHOLD = 0.1
     try:
         drug_cmap.set_bad('white')
+    except Exception:
+        pass
+    try:
+        immune_cmap.set_bad('white')
     except Exception:
         pass
 
@@ -163,7 +180,7 @@ def create_network_evolution_gif(
     # --- initial frame ---
     f0 = all_frames[0]
     imgC = axC.imshow(f0[:, :, 0], cmap=cancer_cmap, vmin=0, vmax=cmax, origin="lower")
-    imgT = axT.imshow(f0[:, :, 1], cmap=immune_cmap, vmin=0, vmax=imax, origin="lower")
+    imgT = axT.imshow(np.ma.masked_less(f0[:, :, 1], T_THRESHOLD), cmap=immune_cmap, vmin=0, vmax=imax, origin="lower")
     imgA = axA.imshow(np.ma.masked_less(f0[:, :, 2], DRUG_THRESHOLD), cmap=drug_cmap, vmin=0, vmax=dmax, origin="lower")
 
     # combined overlay
@@ -194,7 +211,7 @@ def create_network_evolution_gif(
     def animate(k):
         frame = all_frames[k]
         imgC.set_data(frame[:, :, 0])
-        imgT.set_data(frame[:, :, 1])
+        imgT.set_data(np.ma.masked_less(frame[:, :, 1], T_THRESHOLD))
         imgA.set_data(np.ma.masked_less(frame[:, :, 2], DRUG_THRESHOLD))
 
         comb = np.zeros_like(frame)
