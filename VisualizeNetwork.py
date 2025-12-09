@@ -40,6 +40,9 @@ def visualizeNetwork(
     x_rc3 = x.ravel(order="C").reshape(rows, cols, 3, order="C")
     C, T, A = x_rc3[:, :, 0], x_rc3[:, :, 1], x_rc3[:, :, 2]
 
+    # threshold below which drug will be rendered as pure white
+    DRUG_THRESHOLD = 0.1
+
     # plot (single combined figure)
     fig, axes = plt.subplots(1, 3, figsize=figsize)
     panels = (
@@ -48,7 +51,18 @@ def visualizeNetwork(
         (A, cmap_A, f"{title_prefix}Drug (A)"),
     )
     for ax, (data, cmap, ttl) in zip(axes, panels):
-        im = ax.imshow(np.asarray(data), cmap=cmap, origin="lower")
+        # if this is the drug panel, mask small values so they show up as pure white
+        if 'Drug' in ttl or ttl.strip().endswith('(A)'):
+            arr = np.asarray(data)
+            masked = np.ma.masked_where(arr < DRUG_THRESHOLD, arr)
+            cmap_obj = plt.cm.get_cmap(cmap) if isinstance(cmap, str) else cmap
+            try:
+                cmap_obj.set_bad('white')
+            except Exception:
+                pass
+            im = ax.imshow(masked, cmap=cmap_obj, origin="lower")
+        else:
+            im = ax.imshow(np.asarray(data), cmap=cmap, origin="lower")
         ax.set_title(ttl, fontsize=12)
         ax.set_xticks([]); ax.set_yticks([])
         fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
@@ -126,6 +140,12 @@ def create_network_evolution_gif(
     cancer_cmap = LinearSegmentedColormap.from_list("cancer", ["white", "red", "darkred"])
     immune_cmap = LinearSegmentedColormap.from_list("immune", ["white", "blue", "darkblue"])
     drug_cmap   = LinearSegmentedColormap.from_list("drug",   ["white", "green", "darkgreen"])
+    # ensure masked/low drug values render strictly white
+    DRUG_THRESHOLD = 0.1
+    try:
+        drug_cmap.set_bad('white')
+    except Exception:
+        pass
 
     # --- reshape all frames for fast access ---
     all_frames = np.empty((n_frames, rows, cols, 3), dtype=float)
@@ -144,7 +164,7 @@ def create_network_evolution_gif(
     f0 = all_frames[0]
     imgC = axC.imshow(f0[:, :, 0], cmap=cancer_cmap, vmin=0, vmax=cmax, origin="lower")
     imgT = axT.imshow(f0[:, :, 1], cmap=immune_cmap, vmin=0, vmax=imax, origin="lower")
-    imgA = axA.imshow(f0[:, :, 2], cmap=drug_cmap, vmin=0, vmax=dmax, origin="lower")
+    imgA = axA.imshow(np.ma.masked_less(f0[:, :, 2], DRUG_THRESHOLD), cmap=drug_cmap, vmin=0, vmax=dmax, origin="lower")
 
     # combined overlay
     combined = np.zeros_like(f0)
@@ -175,7 +195,7 @@ def create_network_evolution_gif(
         frame = all_frames[k]
         imgC.set_data(frame[:, :, 0])
         imgT.set_data(frame[:, :, 1])
-        imgA.set_data(frame[:, :, 2])
+        imgA.set_data(np.ma.masked_less(frame[:, :, 2], DRUG_THRESHOLD))
 
         comb = np.zeros_like(frame)
         if cmax > 0: comb[:, :, 0] = frame[:, :, 0] / cmax
